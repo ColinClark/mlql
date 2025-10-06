@@ -4,18 +4,18 @@ Rust implementation of MLQL (Machine Learning Query Language) - a domain-specifi
 
 ## Architecture
 
-**MLQL → Substrait → DuckDB** (No SQL generation on hot path)
+**MLQL → SQL → DuckDB** (Clean and simple)
 
 ```
-MLQL Text → AST → JSON IR → Substrait Plan → DuckDB → Arrow/JSON
+MLQL Text → AST → JSON IR → SQL → DuckDB → Arrow/JSON
 ```
 
 ### Key Design Decisions
 
-1. **Substrait-based compilation**: We compile MLQL to Substrait logical plans instead of SQL
-2. **DuckDB Substrait extension**: Execution via `from_substrait_json(?)`
+1. **Direct SQL compilation**: We compile MLQL IR to SQL for execution
+2. **DuckDB native**: Direct SQL execution - no extension dependencies
 3. **Canonical JSON IR**: Deterministic, serializable, cache-friendly
-4. **No SQL injection surface**: Plans are protobuf/JSON, not string interpolation
+4. **SQL injection safe**: Parameterized values, no string interpolation
 
 ## Workspace Structure
 
@@ -24,8 +24,8 @@ Multi-crate workspace:
 - **mlql-ast**: MLQL grammar parser (Pest)
 - **mlql-ir**: Canonical JSON IR with deterministic serialization
 - **mlql-registry**: Function registry and policy definitions
-- **mlql-substrait**: IR → Substrait encoder (prost protobufs)
-- **mlql-duck**: DuckDB executor using Substrait extension
+- **mlql-substrait**: IR → Substrait encoder (for future compatibility)
+- **mlql-duck**: DuckDB executor with IR-to-SQL translator
 - **mlql-server**: HTTP API (Axum)
 
 ## Features
@@ -81,18 +81,19 @@ from customers c
 | filter o.total > 100
 ```
 
-## Substrait Operator Mapping
+## SQL Operator Mapping
 
-| MLQL Operator | Substrait Relation |
-|---------------|-------------------|
-| `select`      | `ProjectRel`      |
-| `filter`      | `FilterRel`       |
-| `join`        | `JoinRel`         |
-| `group`       | `AggregateRel`    |
-| `sort`        | `SortRel`         |
-| `take`        | `FetchRel`        |
-| `knn`         | Custom extension  |
-| `resample`    | Custom extension  |
+| MLQL Operator | SQL Translation        | Status |
+|---------------|------------------------|--------|
+| `select`      | `SELECT ... FROM`      | ✅     |
+| `filter`      | `WHERE`                | ✅     |
+| `sort`        | `ORDER BY`             | ✅     |
+| `take`        | `LIMIT`                | ✅     |
+| `join`        | `JOIN ... ON`          | 🚧     |
+| `group`       | `GROUP BY ... HAVING`  | 🚧     |
+| `distinct`    | `DISTINCT`             | 🚧     |
+| `knn`         | DuckDB vector search   | 📋     |
+| `resample`    | Window + aggregate     | 📋     |
 
 ## Development
 
@@ -129,12 +130,29 @@ curl -X POST http://localhost:3000/v1/execute \
 - **v0.3**: KNN, resample, caching
 - **v0.4**: Streaming, provenance tracking
 
+## Current Status
+
+**✅ Working:**
+- MLQL parser with Pest grammar
+- AST → IR conversion
+- IR → SQL translation for: select, filter, sort, take
+- Wildcard (*) support
+- End-to-end test: `from users | select [*]`
+
+**🚧 In Progress:**
+- Additional operators (join, groupby, distinct)
+- Expression types (comparison, functions, aggregates)
+
+**📋 Planned:**
+- HTTP server API
+- Policy enforcement (budgets, masking)
+- Vector search (KNN)
+- Streaming results
+
 ## References
 
-- [Design Spec](../docs/MLQL_to_Substrait_to_DuckDB_Technical_Design_Spec.pdf)
 - [EBNF Grammar](../docs/EBNF.md)
-- [Substrait Specification](https://substrait.io/)
-- [DuckDB Substrait Extension](https://duckdb.org/docs/extensions/substrait)
+- [DuckDB Documentation](https://duckdb.org/docs/)
 
 ## License
 
