@@ -15,15 +15,15 @@
 - [x] Select with wildcard (*)
 
 ### Phase 3: Projection Operator
-**Status:** 🚧 In Progress
+**Status:** ✅ COMPLETED
 
 **Tasks:**
 - [x] Test select with specific columns: `from users | select [name, age]` ✅
-- [ ] Test select with expressions: `from users | select [age * 2 as double_age]` ❌ (Parser doesn't handle binary operators yet)
+- [x] Test select with expressions: `from users | select [age * 2 as double_age]` ✅
 - [ ] Test select with functions: `from users | select [upper(name) as NAME]`
 - [ ] Test mixed projections: `from users | select [id, upper(name) as name, age + 1 as next_age]`
 
-**Known Issue:** Binary operators (`*`, `+`, etc.) are not yet parsed correctly. The Pest grammar defines them but the parser needs to be rewritten using Pest's precedence climber as recommended by Zen. For now, simple column selection works.
+**Fix Applied:** Rewrote Pest grammar to capture operators as separate rules (`add_op`, `mul_op`) instead of inline patterns. Parser now correctly builds BinaryOp AST nodes.
 
 **Test Cases to Write:**
 ```mlql

@@ -178,46 +178,36 @@ fn parse_expr(pair: pest::iterators::Pair<Rule>) -> Result<Expr, ParseError> {
             }
         }
         Rule::add_expr | Rule::mul_expr => {
-            // Parse binary operators: first_term (op next_term)*
-            // Pest generates flat sequence: [term, op_char, term, op_char, term, ...]
+            // Parse binary operators: term (op term)*
+            // Structure: [term, op, term, op, term, ...]
             let mut inner = pair.into_inner();
             let mut left = parse_expr(inner.next().unwrap())?;
 
-            while let Some(next_pair) = inner.next() {
-                // next_pair could be an operator char or the next term
-                // Need to peek at what it is
-                match next_pair.as_rule() {
-                    Rule::add_expr | Rule::mul_expr | Rule::unary_expr | Rule::postfix | Rule::primary => {
-                        // This is actually the right operand, we need to find the operator
-                        // The operator should have been right before this
-                        // Actually, the Pest grammar generates: term, term, term...
-                        // Let me reconsider - operators might not be separate tokens
-                        // They might be implicit in the structure
-                        // For now, let's just recursively parse and return the first
-                        return Ok(left);
-                    }
-                    _ => {
-                        // This must be an operator - read it as a string
-                        let op_str = next_pair.as_str();
-                        let right_pair = inner.next().ok_or_else(|| ParseError::Syntax("Missing right operand".to_string()))?;
-                        let right = parse_expr(right_pair)?;
-
-                        let op = match op_str {
+            while let Some(op_pair) = inner.next() {
+                // This should be an operator
+                let op = match op_pair.as_rule() {
+                    Rule::add_op | Rule::mul_op => {
+                        match op_pair.as_str() {
                             "+" => BinOp::Add,
                             "-" => BinOp::Sub,
                             "*" => BinOp::Mul,
                             "/" => BinOp::Div,
                             "%" => BinOp::Mod,
-                            _ => return Err(ParseError::Syntax(format!("Unknown operator: {}", op_str))),
-                        };
-
-                        left = Expr::BinaryOp {
-                            op,
-                            left: Box::new(left),
-                            right: Box::new(right),
-                        };
+                            _ => return Err(ParseError::Syntax(format!("Unknown operator: {}", op_pair.as_str()))),
+                        }
                     }
-                }
+                    _ => return Err(ParseError::Syntax(format!("Expected operator, got: {:?}", op_pair.as_rule()))),
+                };
+
+                // Next must be the right operand
+                let right_pair = inner.next().ok_or_else(|| ParseError::Syntax("Missing right operand".to_string()))?;
+                let right = parse_expr(right_pair)?;
+
+                left = Expr::BinaryOp {
+                    op,
+                    left: Box::new(left),
+                    right: Box::new(right),
+                };
             }
 
             Ok(left)
@@ -303,5 +293,32 @@ mod tests {
     fn test_parse_simple_query() {
         let result = parse("from users | select [*]");
         assert!(result.is_ok());
+    }
+
+    #[test]
+    fn test_parse_binary_expr() {
+        // Debug what Pest generates for binary operators
+        let input = "age * 2";
+        let pairs = MlqlParser::parse(Rule::expr, input);
+
+        match pairs {
+            Ok(pairs) => {
+                for pair in pairs {
+                    println!("\nParsing: {}", input);
+                    print_pairs(&pair, 0);
+                }
+            }
+            Err(e) => {
+                println!("Parse error: {:?}", e);
+            }
+        }
+    }
+
+    fn print_pairs(pair: &pest::iterators::Pair<Rule>, depth: usize) {
+        let indent = "  ".repeat(depth);
+        println!("{}Rule::{:?} -> '{}'", indent, pair.as_rule(), pair.as_str());
+        for inner in pair.clone().into_inner() {
+            print_pairs(&inner, depth + 1);
+        }
     }
 }

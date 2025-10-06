@@ -154,9 +154,14 @@ range_or_set = {
     ("(" ~ (expr ~ ("," ~ expr)*)? ~ ")")
 }
 
-add_expr = { mul_expr ~ (("+" | "-") ~ mul_expr)* }
-mul_expr = { unary_expr ~ (("*" | "/" | "%") ~ unary_expr)* }
-unary_expr = { ("-" | "+")? ~ postfix }
+add_expr = { mul_expr ~ (add_op ~ mul_expr)* }
+add_op = { "+" | "-" }
+
+mul_expr = { unary_expr ~ (mul_op ~ unary_expr)* }
+mul_op = { "*" | "/" | "%" }
+
+unary_expr = { unary_op? ~ postfix }
+unary_op = { "-" | "+" }
 
 postfix = { primary ~ postfix_tail* }
 postfix_tail = {
