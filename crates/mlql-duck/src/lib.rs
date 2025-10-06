@@ -32,8 +32,8 @@ impl DuckExecutor {
     pub fn new() -> DuckResult<Self> {
         let conn = Connection::open_in_memory()?;
 
-        // Install and load Substrait extension
-        conn.execute_batch("INSTALL substrait; LOAD substrait;")?;
+        // Install and load Substrait extension from community repository
+        conn.execute_batch("INSTALL substrait FROM community; LOAD substrait;")?;
 
         Ok(Self { conn })
     }
