@@ -396,4 +396,235 @@ mod tests {
 
         Ok(())
     }
+
+    #[test]
+    fn test_filter_simple_comparison() -> Result<(), Box<dyn std::error::Error>> {
+        // Setup
+        let executor = DuckExecutor::new()?;
+        executor.connection().execute_batch(
+            "CREATE TABLE users (id INTEGER, name VARCHAR, age INTEGER);
+             INSERT INTO users VALUES (1, 'Alice', 30), (2, 'Bob', 25), (3, 'Charlie', 35);"
+        )?;
+
+        // Test: filter age > 25
+        let mlql_query = "from users | filter age > 25";
+        let ast_program = mlql_ast::parse(mlql_query)?;
+        let ir_program = ast_program.to_ir();
+        let result = executor.execute_ir(&ir_program, None)?;
+
+        // Verify: Should return Alice (30) and Charlie (35), not Bob (25)
+        println!("Results: {:?}", result);
+        assert_eq!(result.row_count, 2);
+        assert_eq!(result.rows[0][1], serde_json::Value::String("Alice".to_string()));
+        assert_eq!(result.rows[1][1], serde_json::Value::String("Charlie".to_string()));
+
+        Ok(())
+    }
+
+    #[test]
+    fn test_filter_and_condition() -> Result<(), Box<dyn std::error::Error>> {
+        // Setup
+        let executor = DuckExecutor::new()?;
+        executor.connection().execute_batch(
+            "CREATE TABLE users (id INTEGER, name VARCHAR, age INTEGER);
+             INSERT INTO users VALUES (1, 'Alice', 30), (2, 'Bob', 25), (3, 'Charlie', 35), (4, 'Diana', 40);"
+        )?;
+
+        // Test: filter age > 25 && age < 40
+        let mlql_query = "from users | filter age > 25 && age < 40";
+        let ast_program = mlql_ast::parse(mlql_query)?;
+        let ir_program = ast_program.to_ir();
+        let result = executor.execute_ir(&ir_program, None)?;
+
+        // Verify: Should return Alice (30) and Charlie (35)
+        println!("Results: {:?}", result);
+        assert_eq!(result.row_count, 2);
+        assert_eq!(result.rows[0][1], serde_json::Value::String("Alice".to_string()));
+        assert_eq!(result.rows[1][1], serde_json::Value::String("Charlie".to_string()));
+
+        Ok(())
+    }
+
+    #[test]
+    fn test_filter_or_condition() -> Result<(), Box<dyn std::error::Error>> {
+        // Setup
+        let executor = DuckExecutor::new()?;
+        executor.connection().execute_batch(
+            "CREATE TABLE users (id INTEGER, name VARCHAR, age INTEGER);
+             INSERT INTO users VALUES (1, 'Alice', 30), (2, 'Bob', 25), (3, 'Charlie', 35);"
+        )?;
+
+        // Test: filter name == "Alice" || name == "Bob"
+        let mlql_query = "from users | filter name == \"Alice\" || name == \"Bob\"";
+        let ast_program = mlql_ast::parse(mlql_query)?;
+        let ir_program = ast_program.to_ir();
+        let result = executor.execute_ir(&ir_program, None)?;
+
+        // Verify: Should return Alice and Bob, not Charlie
+        println!("Results: {:?}", result);
+        assert_eq!(result.row_count, 2);
+        assert_eq!(result.rows[0][1], serde_json::Value::String("Alice".to_string()));
+        assert_eq!(result.rows[1][1], serde_json::Value::String("Bob".to_string()));
+
+        Ok(())
+    }
+
+    #[test]
+    fn test_filter_like_operator() -> Result<(), Box<dyn std::error::Error>> {
+        // Setup
+        let executor = DuckExecutor::new()?;
+        executor.connection().execute_batch(
+            "CREATE TABLE users (id INTEGER, name VARCHAR, age INTEGER);
+             INSERT INTO users VALUES (1, 'Alice', 30), (2, 'Bob', 25), (3, 'Aaron', 35);"
+        )?;
+
+        // Test: filter name like "A%"
+        let mlql_query = "from users | filter name like \"A%\"";
+        let ast_program = mlql_ast::parse(mlql_query)?;
+        let ir_program = ast_program.to_ir();
+        let result = executor.execute_ir(&ir_program, None)?;
+
+        // Verify: Should return Alice and Aaron, not Bob
+        println!("Results: {:?}", result);
+        assert_eq!(result.row_count, 2);
+        assert_eq!(result.rows[0][1], serde_json::Value::String("Alice".to_string()));
+        assert_eq!(result.rows[1][1], serde_json::Value::String("Aaron".to_string()));
+
+        Ok(())
+    }
+
+    #[test]
+    fn test_llm_json_direct_execution() -> Result<(), Box<dyn std::error::Error>> {
+        // Setup
+        let executor = DuckExecutor::new()?;
+        executor.connection().execute_batch(
+            "CREATE TABLE users (id INTEGER, name VARCHAR, age INTEGER);
+             INSERT INTO users VALUES (1, 'Alice', 30), (2, 'Bob', 25), (3, 'Charlie', 35);"
+        )?;
+
+        // Simulate LLM-generated JSON for: "Show me users older than 25"
+        let llm_json = r#"{
+            "pipeline": {
+                "source": {
+                    "type": "Table",
+                    "name": "users"
+                },
+                "ops": [
+                    {
+                        "op": "Filter",
+                        "condition": {
+                            "type": "BinaryOp",
+                            "op": "Gt",
+                            "left": {
+                                "type": "Column",
+                                "col": {"column": "age"}
+                            },
+                            "right": {
+                                "type": "Literal",
+                                "value": 25
+                            }
+                        }
+                    },
+                    {
+                        "op": "Select",
+                        "projections": [
+                            {
+                                "type": "Column",
+                                "col": {"column": "name"}
+                            },
+                            {
+                                "type": "Column",
+                                "col": {"column": "age"}
+                            }
+                        ]
+                    }
+                ]
+            }
+        }"#;
+
+        // Parse JSON directly into IR
+        let ir_program: mlql_ir::Program = serde_json::from_str(llm_json)?;
+
+        // Execute via DuckDB
+        let result = executor.execute_ir(&ir_program, None)?;
+
+        // Verify: Should return Alice (30) and Charlie (35), not Bob (25)
+        println!("LLM JSON Results: {:?}", result);
+        assert_eq!(result.row_count, 2);
+        assert_eq!(result.columns, vec!["name", "age"]);
+        assert_eq!(result.rows[0][0], serde_json::Value::String("Alice".to_string()));
+        assert_eq!(result.rows[1][0], serde_json::Value::String("Charlie".to_string()));
+
+        Ok(())
+    }
+
+    #[test]
+    fn test_llm_json_with_complex_filter() -> Result<(), Box<dyn std::error::Error>> {
+        // Setup
+        let executor = DuckExecutor::new()?;
+        executor.connection().execute_batch(
+            "CREATE TABLE users (id INTEGER, name VARCHAR, age INTEGER);
+             INSERT INTO users VALUES (1, 'Alice', 30), (2, 'Bob', 25), (3, 'Aaron', 35), (4, 'Diana', 45);"
+        )?;
+
+        // Simulate LLM-generated JSON for: "Show users aged 25-40 or names starting with A"
+        let llm_json = r#"{
+            "pipeline": {
+                "source": {
+                    "type": "Table",
+                    "name": "users"
+                },
+                "ops": [
+                    {
+                        "op": "Filter",
+                        "condition": {
+                            "type": "BinaryOp",
+                            "op": "Or",
+                            "left": {
+                                "type": "BinaryOp",
+                                "op": "And",
+                                "left": {
+                                    "type": "BinaryOp",
+                                    "op": "Ge",
+                                    "left": {"type": "Column", "col": {"column": "age"}},
+                                    "right": {"type": "Literal", "value": 25}
+                                },
+                                "right": {
+                                    "type": "BinaryOp",
+                                    "op": "Le",
+                                    "left": {"type": "Column", "col": {"column": "age"}},
+                                    "right": {"type": "Literal", "value": 40}
+                                }
+                            },
+                            "right": {
+                                "type": "BinaryOp",
+                                "op": "Like",
+                                "left": {"type": "Column", "col": {"column": "name"}},
+                                "right": {"type": "Literal", "value": "A%"}
+                            }
+                        }
+                    }
+                ]
+            }
+        }"#;
+
+        // Parse and execute
+        let ir_program: mlql_ir::Program = serde_json::from_str(llm_json)?;
+        let result = executor.execute_ir(&ir_program, None)?;
+
+        // Verify: Should return Alice (30), Bob (25), Aaron (35), NOT Diana (45)
+        println!("Complex Filter Results: {:?}", result);
+        assert_eq!(result.row_count, 3);
+
+        // Check names
+        let names: Vec<String> = result.rows.iter()
+            .map(|row| row[1].as_str().unwrap().to_string())
+            .collect();
+        assert!(names.contains(&"Alice".to_string()));
+        assert!(names.contains(&"Bob".to_string()));
+        assert!(names.contains(&"Aaron".to_string()));
+        assert!(!names.contains(&"Diana".to_string()));
+
+        Ok(())
+    }
 }

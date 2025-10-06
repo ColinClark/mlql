@@ -364,4 +364,222 @@ mod tests {
 
         assert_eq!(program.fingerprint(), parsed.fingerprint());
     }
+
+    #[test]
+    fn test_llm_json_format_simple_filter() {
+        // Test parsing LLM-generated JSON for: from users | filter age > 25 | select [name, age]
+        let json = r#"{
+            "pipeline": {
+                "source": {
+                    "type": "Table",
+                    "name": "users"
+                },
+                "ops": [
+                    {
+                        "op": "Filter",
+                        "condition": {
+                            "type": "BinaryOp",
+                            "op": "Gt",
+                            "left": {
+                                "type": "Column",
+                                "col": {"column": "age"}
+                            },
+                            "right": {
+                                "type": "Literal",
+                                "value": 25
+                            }
+                        }
+                    },
+                    {
+                        "op": "Select",
+                        "projections": [
+                            {
+                                "type": "Column",
+                                "col": {"column": "name"}
+                            },
+                            {
+                                "type": "Column",
+                                "col": {"column": "age"}
+                            }
+                        ]
+                    }
+                ]
+            }
+        }"#;
+
+        let program: Program = serde_json::from_str(json).unwrap();
+
+        // Verify structure
+        assert_eq!(program.pipeline.ops.len(), 2);
+        match &program.pipeline.ops[0] {
+            Operator::Filter { .. } => {},
+            _ => panic!("Expected Filter operator"),
+        }
+        match &program.pipeline.ops[1] {
+            Operator::Select { projections } => {
+                assert_eq!(projections.len(), 2);
+            },
+            _ => panic!("Expected Select operator"),
+        }
+    }
+
+    #[test]
+    fn test_llm_json_format_aggregation() {
+        // Test parsing LLM-generated JSON for: from sales | filter region == "EU" | group by product_id { revenue: sum(price * qty) }
+        let json = r#"{
+            "pragma": {
+                "options": {
+                    "budget": {"rows_out": 1000}
+                }
+            },
+            "pipeline": {
+                "source": {
+                    "type": "Table",
+                    "name": "sales",
+                    "alias": "s"
+                },
+                "ops": [
+                    {
+                        "op": "Filter",
+                        "condition": {
+                            "type": "BinaryOp",
+                            "op": "Eq",
+                            "left": {
+                                "type": "Column",
+                                "col": {
+                                    "table": "s",
+                                    "column": "region"
+                                }
+                            },
+                            "right": {
+                                "type": "Literal",
+                                "value": "EU"
+                            }
+                        }
+                    },
+                    {
+                        "op": "GroupBy",
+                        "keys": [
+                            {
+                                "table": "s",
+                                "column": "product_id"
+                            }
+                        ],
+                        "aggs": {
+                            "revenue": {
+                                "func": "sum",
+                                "args": [
+                                    {
+                                        "type": "BinaryOp",
+                                        "op": "Mul",
+                                        "left": {
+                                            "type": "Column",
+                                            "col": {"table": "s", "column": "price"}
+                                        },
+                                        "right": {
+                                            "type": "Column",
+                                            "col": {"table": "s", "column": "qty"}
+                                        }
+                                    }
+                                ]
+                            }
+                        }
+                    }
+                ]
+            }
+        }"#;
+
+        let program: Program = serde_json::from_str(json).unwrap();
+
+        // Verify pragma
+        assert!(program.pragma.is_some());
+
+        // Verify source
+        match &program.pipeline.source {
+            Source::Table { name, alias } => {
+                assert_eq!(name, "sales");
+                assert_eq!(alias.as_ref().unwrap(), "s");
+            },
+            _ => panic!("Expected Table source"),
+        }
+
+        // Verify operators
+        assert_eq!(program.pipeline.ops.len(), 2);
+        match &program.pipeline.ops[1] {
+            Operator::GroupBy { keys, aggs } => {
+                assert_eq!(keys.len(), 1);
+                assert_eq!(aggs.len(), 1);
+                assert!(aggs.contains_key("revenue"));
+            },
+            _ => panic!("Expected GroupBy operator"),
+        }
+    }
+
+    #[test]
+    fn test_llm_json_format_complex_filter() {
+        // Test parsing LLM-generated JSON for: from users | filter (age > 25 && age < 40) || name like "A%"
+        let json = r#"{
+            "pipeline": {
+                "source": {
+                    "type": "Table",
+                    "name": "users"
+                },
+                "ops": [
+                    {
+                        "op": "Filter",
+                        "condition": {
+                            "type": "BinaryOp",
+                            "op": "Or",
+                            "left": {
+                                "type": "BinaryOp",
+                                "op": "And",
+                                "left": {
+                                    "type": "BinaryOp",
+                                    "op": "Gt",
+                                    "left": {"type": "Column", "col": {"column": "age"}},
+                                    "right": {"type": "Literal", "value": 25}
+                                },
+                                "right": {
+                                    "type": "BinaryOp",
+                                    "op": "Lt",
+                                    "left": {"type": "Column", "col": {"column": "age"}},
+                                    "right": {"type": "Literal", "value": 40}
+                                }
+                            },
+                            "right": {
+                                "type": "BinaryOp",
+                                "op": "Like",
+                                "left": {"type": "Column", "col": {"column": "name"}},
+                                "right": {"type": "Literal", "value": "A%"}
+                            }
+                        }
+                    }
+                ]
+            }
+        }"#;
+
+        let program: Program = serde_json::from_str(json).unwrap();
+
+        // Verify nested boolean logic
+        match &program.pipeline.ops[0] {
+            Operator::Filter { condition } => {
+                match condition {
+                    Expr::BinaryOp { op: BinOp::Or, left, right } => {
+                        // Left should be AND
+                        match left.as_ref() {
+                            Expr::BinaryOp { op: BinOp::And, .. } => {},
+                            _ => panic!("Expected AND on left side"),
+                        }
+                        // Right should be LIKE
+                        match right.as_ref() {
+                            Expr::BinaryOp { op: BinOp::Like, .. } => {},
+                            _ => panic!("Expected LIKE on right side"),
+                        }
+                    },
+                    _ => panic!("Expected OR at root"),
+                }
+            },
+            _ => panic!("Expected Filter operator"),
+        }
+    }
 }

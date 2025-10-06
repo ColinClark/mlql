@@ -41,28 +41,21 @@ from users | select [id, upper(name) as name, age + 1 as next_age]
 ```
 
 ### Phase 4: Filter Combinations
-**Status:** 📋 Planned
+**Status:** ✅ COMPLETED
 
 **Tasks:**
-- [ ] Test simple comparisons: `filter age > 25`
-- [ ] Test AND conditions: `filter age > 25 && name == "Alice"`
-- [ ] Test OR conditions: `filter age < 20 || age > 60`
-- [ ] Test LIKE operator: `filter name like "A%"`
+- [x] Test simple comparisons: `filter age > 25` ✅
+- [x] Test AND conditions: `filter age > 25 && age < 40` ✅
+- [x] Test OR conditions: `filter name == "Alice" || name == "Bob"` ✅
+- [x] Test LIKE operator: `filter name like "A%"` ✅
 
-**Test Cases to Write:**
-```mlql
-// Simple comparison
-from users | filter age > 25
+**Tests Added:**
+- `test_filter_simple_comparison` - WHERE (age > 25)
+- `test_filter_and_condition` - WHERE ((age > 25) AND (age < 40))
+- `test_filter_or_condition` - WHERE ((name = 'Alice') OR (name = 'Bob'))
+- `test_filter_like_operator` - WHERE (name LIKE 'A%')
 
-// AND condition
-from users | filter age > 25 && age < 40
-
-// OR condition
-from users | filter name == "Alice" || name == "Bob"
-
-// LIKE pattern
-from users | filter name like "A%"
-```
+All tests passing with correct SQL generation!
 
 ### Phase 5: Distinct Operator
 **Status:** 📋 Planned
