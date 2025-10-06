@@ -58,21 +58,24 @@ from users | select [id, upper(name) as name, age + 1 as next_age]
 All tests passing with correct SQL generation!
 
 ### Phase 5: Distinct Operator
-**Status:** 📋 Planned
+**Status:** ✅ COMPLETED
 
 **Tasks:**
-- [ ] Implement DISTINCT in IR-to-SQL
-- [ ] Test: `from users | select [name] | distinct`
-- [ ] Test with multiple columns: `from users | select [name, age] | distinct`
+- [x] Implement DISTINCT in IR-to-SQL ✅
+- [x] Test: `from users | select [city] | distinct` ✅
+- [x] Test with multiple columns: `from locations | select [city, state] | distinct` ✅
 
-**Test Cases to Write:**
-```mlql
-// Single column distinct
-from users | select [name] | distinct
+**Tests Added:**
+- `test_distinct_single_column` - SELECT DISTINCT city FROM users
+- `test_distinct_multiple_columns` - SELECT DISTINCT city, state FROM locations
 
-// Multi-column distinct
-from users | select [city, state] | distinct
+**SQL Generated:**
+```sql
+SELECT DISTINCT city FROM users
+SELECT DISTINCT city, state FROM locations
 ```
+
+All tests passing!
 
 ### Phase 6: GroupBy Operator
 **Status:** 📋 Planned

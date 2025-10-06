@@ -188,6 +188,7 @@ fn build_sql_query(table: &str, operators: &[mlql_ir::Operator]) -> Result<Strin
     let mut where_clause = None;
     let mut order_clause = None;
     let mut limit_clause = None;
+    let mut distinct = false;
 
     // Process operators in order
     for op in operators {
@@ -231,12 +232,16 @@ fn build_sql_query(table: &str, operators: &[mlql_ir::Operator]) -> Result<Strin
             mlql_ir::Operator::Take { limit } => {
                 limit_clause = Some(limit.to_string());
             }
+            mlql_ir::Operator::Distinct => {
+                distinct = true;
+            }
             _ => return Err(ExecutionError::SubstraitError(format!("Unsupported operator: {:?}", op))),
         }
     }
 
     // Build final SQL
-    let mut sql = format!("SELECT {} FROM {}", select_clause, table);
+    let distinct_sql = if distinct { "DISTINCT " } else { "" };
+    let mut sql = format!("SELECT {}{} FROM {}", distinct_sql, select_clause, table);
 
     if let Some(where_sql) = where_clause {
         sql.push_str(&format!(" WHERE {}", where_sql));
@@ -624,6 +629,67 @@ mod tests {
         assert!(names.contains(&"Bob".to_string()));
         assert!(names.contains(&"Aaron".to_string()));
         assert!(!names.contains(&"Diana".to_string()));
+
+        Ok(())
+    }
+
+    #[test]
+    fn test_distinct_single_column() -> Result<(), Box<dyn std::error::Error>> {
+        // Setup
+        let executor = DuckExecutor::new()?;
+        executor.connection().execute_batch(
+            "CREATE TABLE users (id INTEGER, name VARCHAR, city VARCHAR);
+             INSERT INTO users VALUES
+                (1, 'Alice', 'NYC'),
+                (2, 'Bob', 'LA'),
+                (3, 'Charlie', 'NYC'),
+                (4, 'Diana', 'LA');"
+        )?;
+
+        // Test: from users | select [city] | distinct
+        let mlql_query = "from users | select [city] | distinct";
+        let ast_program = mlql_ast::parse(mlql_query)?;
+        let ir_program = ast_program.to_ir();
+        let result = executor.execute_ir(&ir_program, None)?;
+
+        // Verify: Should return only 2 unique cities: NYC, LA
+        println!("Distinct Results: {:?}", result);
+        assert_eq!(result.row_count, 2);
+        assert_eq!(result.columns, vec!["city"]);
+
+        // Collect unique cities
+        let cities: Vec<String> = result.rows.iter()
+            .map(|row| row[0].as_str().unwrap().to_string())
+            .collect();
+        assert!(cities.contains(&"NYC".to_string()));
+        assert!(cities.contains(&"LA".to_string()));
+
+        Ok(())
+    }
+
+    #[test]
+    fn test_distinct_multiple_columns() -> Result<(), Box<dyn std::error::Error>> {
+        // Setup
+        let executor = DuckExecutor::new()?;
+        executor.connection().execute_batch(
+            "CREATE TABLE locations (city VARCHAR, state VARCHAR, zip INTEGER);
+             INSERT INTO locations VALUES
+                ('NYC', 'NY', 10001),
+                ('NYC', 'NY', 10002),
+                ('LA', 'CA', 90001),
+                ('LA', 'CA', 90001);"
+        )?;
+
+        // Test: from locations | select [city, state] | distinct
+        let mlql_query = "from locations | select [city, state] | distinct";
+        let ast_program = mlql_ast::parse(mlql_query)?;
+        let ir_program = ast_program.to_ir();
+        let result = executor.execute_ir(&ir_program, None)?;
+
+        // Verify: Should return 2 unique (city, state) pairs
+        println!("Distinct Multi-Column Results: {:?}", result);
+        assert_eq!(result.row_count, 2);
+        assert_eq!(result.columns, vec!["city", "state"]);
 
         Ok(())
     }
