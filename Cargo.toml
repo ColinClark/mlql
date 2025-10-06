@@ -30,8 +30,8 @@ prost-types = "0.14"
 prost-reflect = { version = "0.16", features = ["serde", "derive"] }
 
 # Database
-# Using DuckDB 1.4 - latest version, no Substrait extension needed
-duckdb = { version = "1.4", features = ["bundled"] }
+# Using DuckDB 1.4 - using system-installed library for faster builds
+duckdb = "1.4"
 arrow = "56"
 
 # Async runtime (for server)
