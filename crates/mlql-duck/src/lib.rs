@@ -14,8 +14,8 @@ pub enum ExecutionError {
     #[error("Query timeout")]
     Timeout,
 
-    #[error("Substrait execution failed: {0}")]
-    SubstraitError(String),
+    #[error("SQL generation failed: {0}")]
+    SqlError(String),
 }
 
 pub struct ExecutionBudget {
@@ -175,7 +175,7 @@ fn ir_to_sql(program: &mlql_ir::Program) -> Result<String, ExecutionError> {
                 name.clone()
             }
         }
-        _ => return Err(ExecutionError::SubstraitError("Unsupported source type".to_string())),
+        _ => return Err(ExecutionError::SqlError("Unsupported source type".to_string())),
     };
 
     // Build the SQL query by processing operators
@@ -227,8 +227,8 @@ fn build_sql_query(table: &str, operators: &[mlql_ir::Operator]) -> Result<Strin
                     Some(mlql_ir::JoinType::Right) => "RIGHT JOIN",
                     Some(mlql_ir::JoinType::Full) => "FULL OUTER JOIN",
                     Some(mlql_ir::JoinType::Cross) => "CROSS JOIN",
-                    Some(mlql_ir::JoinType::Semi) => return Err(ExecutionError::SubstraitError("SEMI JOIN not yet supported".to_string())),
-                    Some(mlql_ir::JoinType::Anti) => return Err(ExecutionError::SubstraitError("ANTI JOIN not yet supported".to_string())),
+                    Some(mlql_ir::JoinType::Semi) => return Err(ExecutionError::SqlError("SEMI JOIN not yet supported".to_string())),
+                    Some(mlql_ir::JoinType::Anti) => return Err(ExecutionError::SqlError("ANTI JOIN not yet supported".to_string())),
                 };
 
                 // Get the source table/alias
@@ -240,7 +240,7 @@ fn build_sql_query(table: &str, operators: &[mlql_ir::Operator]) -> Result<Strin
                             name.clone()
                         }
                     }
-                    _ => return Err(ExecutionError::SubstraitError("Unsupported JOIN source type".to_string())),
+                    _ => return Err(ExecutionError::SqlError("Unsupported JOIN source type".to_string())),
                 };
 
                 // Build ON condition
@@ -295,7 +295,7 @@ fn build_sql_query(table: &str, operators: &[mlql_ir::Operator]) -> Result<Strin
             mlql_ir::Operator::Distinct => {
                 distinct = true;
             }
-            _ => return Err(ExecutionError::SubstraitError(format!("Unsupported operator: {:?}", op))),
+            _ => return Err(ExecutionError::SqlError(format!("Unsupported operator: {:?}", op))),
         }
     }
 

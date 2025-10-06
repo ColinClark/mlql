@@ -5,7 +5,6 @@ edition.workspace = true
 
 [dependencies]
 mlql-ir = { path = "../mlql-ir" }
-mlql-substrait = { path = "../mlql-substrait" }
 duckdb.workspace = true
 arrow.workspace = true
 thiserror.workspace = true

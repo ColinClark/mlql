@@ -4,7 +4,6 @@ members = [
     "crates/mlql-ast",
     "crates/mlql-ir",
     "crates/mlql-registry",
-    "crates/mlql-substrait",
     "crates/mlql-duck",
     "crates/mlql-server",
 ]
@@ -23,11 +22,6 @@ pest_derive = "2.7"
 # Serialization
 serde = { version = "1.0", features = ["derive"] }
 serde_json = "1.0"
-
-# Substrait
-prost = "0.14"
-prost-types = "0.14"
-prost-reflect = { version = "0.16", features = ["serde", "derive"] }
 
 # Database
 # Using DuckDB 1.4 - using system-installed library for faster builds

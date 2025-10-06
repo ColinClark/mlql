@@ -7,7 +7,6 @@ edition.workspace = true
 mlql-ast = { path = "../mlql-ast" }
 mlql-ir = { path = "../mlql-ir" }
 mlql-registry = { path = "../mlql-registry" }
-mlql-substrait = { path = "../mlql-substrait" }
 mlql-duck = { path = "../mlql-duck" }
 
 tokio.workspace = true
