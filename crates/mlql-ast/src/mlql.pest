@@ -138,9 +138,14 @@ arg_list = { expr ~ ("," ~ expr)* }
 
 expr = { or_expr }
 
-or_expr = { and_expr ~ ("||" ~ and_expr)* }
-and_expr = { not_expr ~ ("&&" ~ not_expr)* }
-not_expr = { "!"? ~ cmp_expr }
+or_expr = { and_expr ~ (or_op ~ and_expr)* }
+or_op = { "||" }
+
+and_expr = { not_expr ~ (and_op ~ not_expr)* }
+and_op = { "&&" }
+
+not_expr = { not_op? ~ cmp_expr }
+not_op = { "!" }
 
 cmp_expr = { add_expr ~ (cmp_op ~ add_expr)* }
 cmp_op = {

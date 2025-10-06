@@ -167,14 +167,69 @@ fn parse_sort_key(pair: pest::iterators::Pair<Rule>) -> Result<SortKey, ParseErr
 
 fn parse_expr(pair: pest::iterators::Pair<Rule>) -> Result<Expr, ParseError> {
     match pair.as_rule() {
-        // Expression hierarchy - need to handle binary operators
-        Rule::expr | Rule::or_expr | Rule::and_expr | Rule::not_expr | Rule::cmp_expr => {
-            // These just unwrap to the next level
+        // Expression hierarchy - unwrap single-element rules
+        Rule::expr => {
             let mut inner = pair.into_inner();
             if let Some(first) = inner.next() {
                 parse_expr(first)
             } else {
                 Err(ParseError::Syntax("Empty expression".to_string()))
+            }
+        }
+        // Binary operators: OR, AND, comparison
+        Rule::or_expr | Rule::and_expr | Rule::cmp_expr => {
+            let mut inner = pair.into_inner();
+            let mut left = parse_expr(inner.next().unwrap())?;
+
+            while let Some(op_pair) = inner.next() {
+                let op = match op_pair.as_rule() {
+                    Rule::or_op => BinOp::Or,
+                    Rule::and_op => BinOp::And,
+                    Rule::cmp_op => {
+                        match op_pair.as_str() {
+                            "==" => BinOp::Eq,
+                            "!=" => BinOp::Ne,
+                            "<" => BinOp::Lt,
+                            "<=" => BinOp::Le,
+                            ">" => BinOp::Gt,
+                            ">=" => BinOp::Ge,
+                            "like" => BinOp::Like,
+                            "ilike" => BinOp::ILike,
+                            _ => return Err(ParseError::Syntax(format!("Unknown comparison operator: {}", op_pair.as_str()))),
+                        }
+                    }
+                    _ => return Err(ParseError::Syntax(format!("Expected operator, got: {:?}", op_pair.as_rule()))),
+                };
+
+                let right_pair = inner.next().ok_or_else(|| ParseError::Syntax("Missing right operand".to_string()))?;
+                let right = parse_expr(right_pair)?;
+
+                left = Expr::BinaryOp {
+                    op,
+                    left: Box::new(left),
+                    right: Box::new(right),
+                };
+            }
+
+            Ok(left)
+        }
+        // Unary NOT operator
+        Rule::not_expr => {
+            let mut inner = pair.into_inner();
+            let first = inner.next().unwrap();
+
+            // Check if it's a NOT operator or just the expression
+            if first.as_rule() == Rule::not_op {
+                // It's a NOT, next should be the expression
+                let expr_pair = inner.next().ok_or_else(|| ParseError::Syntax("Missing expression after NOT".to_string()))?;
+                let expr = parse_expr(expr_pair)?;
+                Ok(Expr::UnaryOp {
+                    op: UnOp::Not,
+                    expr: Box::new(expr),
+                })
+            } else {
+                // No NOT, just parse the expression
+                parse_expr(first)
             }
         }
         Rule::add_expr | Rule::mul_expr => {
