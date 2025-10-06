@@ -1,0 +1,242 @@
+# MLQL Development Progress
+
+## Current Branch: feature/complete-operators
+
+### Completed Work
+
+#### Phase 1: Expression Support ✅
+- Column references
+- Literals (int, float, string, bool, null)
+- Binary operators (arithmetic, comparison, logical)
+- Function calls
+
+#### Phase 2: Basic Operators ✅
+- Filter operator (WHERE clause)
+- Sort operator (ORDER BY with ASC/DESC)
+- Take operator (LIMIT)
+- Select with wildcard (*)
+
+#### Phase 3: Projection Operator ✅
+**Key Achievement**: Fixed the "hard stuff" - binary operator parsing
+
+**Problem**: Parser was losing operators in expressions like `age * 2`
+- Only parsed as `age`, completely dropping `* 2`
+- Root cause: Pest grammar had operators in non-capturing inline groups
+
+**Solution**: Rewrote Pest grammar to extract operators as separate rules:
+```pest
+# Before (broken):
+mul_expr = { unary_expr ~ (("*" | "/" | "%") ~ unary_expr)* }
+
+# After (fixed):
+mul_expr = { unary_expr ~ (mul_op ~ unary_expr)* }
+mul_op = { "*" | "/" | "%" }
+```
+
+Applied same fix to all operators:
+- `add_op`: `+`, `-`
+- `mul_op`: `*`, `/`, `%`
+- `or_op`: `||`
+- `and_op`: `&&`
+- `not_op`: `!`
+- `cmp_op`: `==`, `!=`, `<`, `>`, `<=`, `>=`, `like`, `ilike`
+
+**Tests Passing**:
+- ✅ `from users | select [name, age]` → `SELECT name, age FROM users`
+- ✅ `from users | select [age * 2 as double_age]` → `SELECT (age * 2) AS double_age FROM users`
+
+#### Phase 4: Filter Combinations ✅
+All comparison and logical operators working in WHERE clauses:
+
+**Tests Passing**:
+- ✅ `filter age > 25` → `WHERE (age > 25)`
+- ✅ `filter age > 25 && age < 40` → `WHERE ((age > 25) AND (age < 40))`
+- ✅ `filter name == "Alice" || name == "Bob"` → `WHERE ((name = 'Alice') OR (name = 'Bob'))`
+- ✅ `filter name like "A%"` → `WHERE (name LIKE 'A%')`
+
+### LLM JSON IR Format ✅
+
+**Achievement**: Complete JSON IR schema for LLM output
+
+**Why JSON IR?**
+1. **Validation**: JSON schema validation before execution
+2. **Repair**: Structured errors make fixing easier
+3. **Caching**: Deterministic fingerprinting via SHA-256
+4. **Provenance**: Track query origin and transformations
+5. **Safety**: Type-checked before SQL generation
+
+**Documentation**: `docs/llm-json-format.md` contains:
+- Complete JSON schema with examples
+- All operators and expressions
+- Binary/unary operator reference tables
+- LLM prompt templates
+
+**JSON Format Example**:
+```json
+{
+  "pipeline": {
+    "source": {
+      "type": "Table",
+      "name": "users"
+    },
+    "ops": [
+      {
+        "op": "Filter",
+        "condition": {
+          "type": "BinaryOp",
+          "op": "Gt",
+          "left": {
+            "type": "Column",
+            "col": {"column": "age"}
+          },
+          "right": {
+            "type": "Literal",
+            "value": 25
+          }
+        }
+      }
+    ]
+  }
+}
+```
+
+**Tests Passing**:
+- ✅ 3 JSON parsing tests in `mlql-ir`
+- ✅ 2 end-to-end LLM JSON execution tests in `mlql-duck`
+- ✅ Verified LLM JSON → IR → SQL → Results flow
+
+### Architecture Simplification ✅
+
+**Before**:
+```
+MLQL Text → AST → IR → Substrait Proto → DuckDB Extension
+```
+
+**After**:
+```
+MLQL Text → AST → IR → SQL → DuckDB
+     OR
+LLM JSON → IR → SQL → DuckDB
+```
+
+**Benefits**:
+- Removed Substrait dependency (complex protobuf encoding)
+- Removed DuckDB extension requirement
+- Upgraded to DuckDB 1.4 with bundled build
+- Cleaner SQL generation (no nested subqueries)
+
+### SQL Generation Quality ✅
+
+**Problem**: Generated nested subqueries:
+```sql
+SELECT * FROM (SELECT * FROM users)
+```
+
+**Solution**: Rewrote `build_sql_query()` to accumulate clauses:
+```rust
+let mut select_clause = "*";
+let mut where_clause = None;
+let mut order_clause = None;
+let mut limit_clause = None;
+
+// Process operators
+for op in operators { ... }
+
+// Build final SQL
+format!("SELECT {} FROM {}", select_clause, table)
+```
+
+**Result**: Clean, single SELECT statements:
+```sql
+SELECT name, age FROM users WHERE (age > 25) ORDER BY age DESC LIMIT 10
+```
+
+### Test Summary
+
+**Total Tests Passing**: 18
+
+#### mlql-ir (5 tests)
+- `test_fingerprint_deterministic`
+- `test_json_round_trip`
+- `test_llm_json_format_simple_filter`
+- `test_llm_json_format_aggregation`
+- `test_llm_json_format_complex_filter`
+
+#### mlql-ast (3 tests)
+- `test_parse_basic`
+- `test_parse_simple_query`
+- `test_parse_binary_expr`
+
+#### mlql-duck (10 tests)
+- `test_executor_init`
+- `test_end_to_end_simple_select`
+- `test_select_specific_columns`
+- `test_select_with_expression`
+- `test_filter_simple_comparison`
+- `test_filter_and_condition`
+- `test_filter_or_condition`
+- `test_filter_like_operator`
+- `test_llm_json_direct_execution`
+- `test_llm_json_with_complex_filter`
+
+### Commits on This Branch
+
+1. **"Fix binary operator parsing - the hard stuff!"**
+   - Rewrote Pest grammar for operator capture
+   - Added comprehensive operator support
+
+2. **"Add logical and comparison operators (||, &&, !, like, ilike)"**
+   - Extended parser with all comparison/logical ops
+   - All tests passing
+
+3. **"Add Phase 4: Filter Combinations + LLM JSON IR format"**
+   - 4 filter tests with complex conditions
+   - Complete LLM JSON documentation
+   - 5 JSON IR parsing/execution tests
+
+4. **"Remove broken debug_parse example"**
+   - Cleanup
+
+## Next Steps (TODO.md)
+
+### Phase 5: Distinct Operator 📋
+- [ ] Implement DISTINCT in IR-to-SQL
+- [ ] Test: `from users | select [name] | distinct`
+
+### Phase 6: GroupBy Operator 📋
+- [ ] Implement GROUP BY in IR-to-SQL
+- [ ] Support aggregate functions (sum, count, avg, min, max)
+- [ ] Test: `group by city { total: count(*) }`
+
+### Phase 7: Join Operator 📋
+- [ ] Implement JOIN in IR-to-SQL (INNER, LEFT, RIGHT, FULL)
+- [ ] Test multi-table joins
+
+### Phase 8: Union/Except/Intersect 📋
+- [ ] Implement set operations
+- [ ] Test UNION, EXCEPT, INTERSECT
+
+## Key Learnings
+
+1. **Pest PEG Parsing**: Operators in repetition patterns (`*`) must be separate named rules to be captured
+2. **Clean SQL Generation**: Accumulate clauses instead of nesting subqueries
+3. **JSON IR for LLMs**: Structured output is easier to validate, repair, and cache than text
+4. **TDD Approach**: Write tests first, implement features, commit when passing
+
+## Development Workflow
+
+1. Pick task from TODO.md
+2. Write test case first (TDD)
+3. Implement feature
+4. Run tests until passing
+5. Commit with descriptive message
+6. Update TODO.md
+7. Move to next task
+
+## Project Health
+
+- ✅ All core tests passing
+- ✅ Clean git history with descriptive commits
+- ✅ Architecture simplified and modernized
+- ✅ Documentation complete for LLM integration
+- ✅ Ready for Phase 5: Distinct operator
