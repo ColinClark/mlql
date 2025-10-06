@@ -174,7 +174,29 @@ Implemented GROUP BY with aggregate functions (sum, count, avg).
 
 ### Test Summary
 
-**Total Tests Passing**: 23
+#### Phase 7: Join Operator ✅
+Implemented JOIN support with multiple join types.
+
+**Implementation**:
+- JOIN modifies FROM clause instead of WHERE
+- Supports INNER, LEFT, RIGHT, FULL OUTER, CROSS JOIN
+- Multiple JOINs chain in FROM clause
+- ON conditions converted via expr_to_sql()
+
+**Tests Passing**:
+- ✅ `test_join_inner` - SELECT * FROM users INNER JOIN orders ON condition
+- ✅ `test_join_left` - SELECT * FROM users LEFT JOIN orders ON condition (includes NULL rows)
+- ✅ `test_join_multiple` - 3-table chain: users → orders → products
+
+### Codebase Cleanup ✅
+
+**Removed Substrait**: Deleted 2,820 lines of unused Substrait code
+- Removed mlql-substrait crate entirely
+- Removed prost, prost-types, prost-reflect dependencies
+- Renamed SubstraitError → SqlError
+- Simplified architecture: direct SQL generation only
+
+**Total Tests Passing**: 26
 
 #### mlql-ir (5 tests)
 - `test_fingerprint_deterministic`
@@ -188,7 +210,7 @@ Implemented GROUP BY with aggregate functions (sum, count, avg).
 - `test_parse_simple_query`
 - `test_parse_binary_expr`
 
-#### mlql-duck (14 tests)
+#### mlql-duck (17 tests)
 - `test_executor_init`
 - `test_end_to_end_simple_select`
 - `test_select_specific_columns`
@@ -203,6 +225,9 @@ Implemented GROUP BY with aggregate functions (sum, count, avg).
 - `test_distinct_multiple_columns`
 - `test_group_by_simple`
 - `test_group_by_multiple_aggregates`
+- `test_join_inner`
+- `test_join_left`
+- `test_join_multiple`
 
 ### Commits on This Branch
 
