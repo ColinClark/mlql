@@ -60,7 +60,8 @@ op = {
 
 select_op = { "select" ~ "[" ~ proj_list ~ "]" }
 proj_list = { proj_item ~ ("," ~ proj_item)* }
-proj_item = { (ident ~ "as" ~ ident) | expr }
+proj_item = { wildcard | (expr ~ ("as" ~ ident)?) }
+wildcard = { "*" }
 
 filter_op = { "filter" ~ expr }
 

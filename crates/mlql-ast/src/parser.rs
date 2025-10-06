@@ -133,23 +133,24 @@ fn parse_operator(pair: pest::iterators::Pair<Rule>) -> Result<Operator, ParseEr
 }
 
 fn parse_select_item(pair: pest::iterators::Pair<Rule>) -> Result<SelectItem, ParseError> {
-    if pair.as_str().trim() == "*" {
-        return Ok(SelectItem::Wildcard);
-    }
+    let mut inner = pair.into_inner();
+    let first = inner.next().unwrap();
 
-    // Try to parse as "expr as alias"
-    let mut parts = pair.into_inner();
-    let first = parts.next().unwrap();
-
-    if let Some(alias_part) = parts.next() {
-        // Has "as alias"
-        Ok(SelectItem::Aliased {
-            expr: parse_expr(first)?,
-            alias: alias_part.as_str().to_string(),
-        })
-    } else {
-        // Just expr
-        Ok(SelectItem::Expr(parse_expr(first)?))
+    match first.as_rule() {
+        Rule::wildcard => Ok(SelectItem::Wildcard),
+        Rule::expr => {
+            let expr = parse_expr(first)?;
+            // Check if there's an "as alias" following
+            if let Some(alias_pair) = inner.next() {
+                Ok(SelectItem::Aliased {
+                    expr,
+                    alias: alias_pair.as_str().to_string(),
+                })
+            } else {
+                Ok(SelectItem::Expr(expr))
+            }
+        }
+        _ => Err(ParseError::Syntax("Invalid select item".to_string())),
     }
 }
 

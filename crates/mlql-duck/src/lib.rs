@@ -31,10 +31,6 @@ pub struct DuckExecutor {
 impl DuckExecutor {
     pub fn new() -> DuckResult<Self> {
         let conn = Connection::open_in_memory()?;
-
-        // Install and load Substrait extension from community repository
-        conn.execute_batch("INSTALL substrait FROM community; LOAD substrait;")?;
-
         Ok(Self { conn })
     }
 
@@ -42,10 +38,10 @@ impl DuckExecutor {
         Self { conn }
     }
 
-    /// Execute Substrait plan (JSON format)
-    pub fn execute_substrait_json(
+    /// Execute MLQL IR program by converting to SQL
+    pub fn execute_ir(
         &self,
-        substrait_json: &str,
+        program: &mlql_ir::Program,
         budget: Option<ExecutionBudget>,
     ) -> Result<QueryResult, ExecutionError> {
         // Apply budget constraints
@@ -53,26 +49,40 @@ impl DuckExecutor {
             self.apply_budget(budget)?;
         }
 
-        // Execute via DuckDB's Substrait extension
-        let query = "SELECT * FROM from_substrait_json(?)";
+        // Convert IR to SQL
+        let sql = ir_to_sql(program)?;
 
-        // Prepare statement
-        let mut stmt = self.conn.prepare(query)?;
+        eprintln!("Generated SQL: {}", sql);
 
-        // Extract column names before executing
-        let column_count = stmt.column_count();
-        let column_names: Vec<String> = (0..column_count)
-            .map(|i| stmt.column_name(i).unwrap_or(&"unknown".to_string()).to_string())
-            .collect();
+        // Execute SQL query
+        self.execute_sql(&sql, budget)
+    }
 
-        // Execute query
-        let mut rows = stmt.query([substrait_json])?;
+    /// Execute SQL query directly
+    fn execute_sql(
+        &self,
+        sql: &str,
+        budget: Option<ExecutionBudget>,
+    ) -> Result<QueryResult, ExecutionError> {
+        // Execute query and collect rows
+        let mut stmt = self.conn.prepare(sql)?;
+        let mut rows = stmt.query([])?;
 
         // Collect rows
         let mut result_rows = Vec::new();
         let mut row_count = 0;
+        let mut column_names: Vec<String> = Vec::new();
+        let mut column_count = 0;
 
         while let Some(row) = rows.next()? {
+            // Get column info from first row
+            if column_names.is_empty() {
+                column_count = row.as_ref().column_count();
+                column_names = (0..column_count)
+                    .map(|i| row.as_ref().column_name(i).unwrap_or(&format!("col{}", i)).to_string())
+                    .collect();
+            }
+
             let mut json_row = Vec::new();
 
             for i in 0..column_count {
@@ -120,23 +130,6 @@ impl DuckExecutor {
         })
     }
 
-    /// Execute Substrait plan (binary format)
-    pub fn execute_substrait_binary(
-        &self,
-        substrait_bytes: &[u8],
-        budget: Option<ExecutionBudget>,
-    ) -> Result<QueryResult, ExecutionError> {
-        // Apply budget constraints
-        if let Some(ref budget) = budget {
-            self.apply_budget(budget)?;
-        }
-
-        // Execute via DuckDB's Substrait extension
-        // Uses: SELECT * FROM from_substrait(?)
-
-        todo!("Binary Substrait execution not yet implemented")
-    }
-
     fn apply_budget(&self, budget: &ExecutionBudget) -> Result<(), ExecutionError> {
         // Set PRAGMAs for resource limits
         if let Some(max_memory_mb) = budget.max_memory_mb {
@@ -169,21 +162,136 @@ impl Default for DuckExecutor {
     }
 }
 
+/// Convert MLQL IR to DuckDB SQL
+fn ir_to_sql(program: &mlql_ir::Program) -> Result<String, ExecutionError> {
+    let pipeline = &program.pipeline;
+
+    // Start with the source
+    let mut sql = match &pipeline.source {
+        mlql_ir::Source::Table { name, alias } => {
+            if let Some(a) = alias {
+                format!("SELECT * FROM {} AS {}", name, a)
+            } else {
+                format!("SELECT * FROM {}", name)
+            }
+        }
+        _ => return Err(ExecutionError::SubstraitError("Unsupported source type".to_string())),
+    };
+
+    // Apply operators
+    for op in &pipeline.ops {
+        sql = apply_operator_to_sql(&sql, op)?;
+    }
+
+    Ok(sql)
+}
+
+fn apply_operator_to_sql(base_sql: &str, op: &mlql_ir::Operator) -> Result<String, ExecutionError> {
+    match op {
+        mlql_ir::Operator::Select { projections } => {
+            // Build SELECT list
+            let select_items: Vec<String> = projections.iter().map(|proj| {
+                match proj {
+                    mlql_ir::Projection::Expr(expr) => {
+                        // Check if it's a wildcard (column named "*")
+                        if let mlql_ir::Expr::Column { col } = expr {
+                            if col.column == "*" && col.table.is_none() {
+                                return "*".to_string();
+                            }
+                        }
+                        expr_to_sql(expr)
+                    }
+                    mlql_ir::Projection::Aliased { expr, alias } => {
+                        format!("{} AS {}", expr_to_sql(expr), alias)
+                    }
+                }
+            }).collect();
+
+            Ok(format!("SELECT {} FROM ({})", select_items.join(", "), base_sql))
+        }
+        mlql_ir::Operator::Filter { condition } => {
+            Ok(format!("SELECT * FROM ({}) WHERE {}", base_sql, expr_to_sql(condition)))
+        }
+        mlql_ir::Operator::Sort { keys } => {
+            let order_items: Vec<String> = keys.iter().map(|key| {
+                let expr = expr_to_sql(&key.expr);
+                if key.desc {
+                    format!("{} DESC", expr)
+                } else {
+                    format!("{} ASC", expr)
+                }
+            }).collect();
+
+            Ok(format!("SELECT * FROM ({}) ORDER BY {}", base_sql, order_items.join(", ")))
+        }
+        mlql_ir::Operator::Take { limit } => {
+            Ok(format!("SELECT * FROM ({}) LIMIT {}", base_sql, limit))
+        }
+        _ => Err(ExecutionError::SubstraitError(format!("Unsupported operator: {:?}", op))),
+    }
+}
+
+fn expr_to_sql(expr: &mlql_ir::Expr) -> String {
+    match expr {
+        mlql_ir::Expr::Column { col } => column_ref_to_sql(col),
+        mlql_ir::Expr::Literal { value } => literal_to_sql(value),
+        mlql_ir::Expr::BinaryOp { op, left, right } => {
+            format!("({} {} {})", expr_to_sql(left), binop_to_sql(op), expr_to_sql(right))
+        }
+        mlql_ir::Expr::FuncCall { func, args } => {
+            let arg_strs: Vec<String> = args.iter().map(expr_to_sql).collect();
+            format!("{}({})", func, arg_strs.join(", "))
+        }
+        _ => "NULL".to_string(),  // TODO: Handle more expression types
+    }
+}
+
+fn column_ref_to_sql(col: &mlql_ir::ColumnRef) -> String {
+    if let Some(ref table) = col.table {
+        format!("{}.{}", table, col.column)
+    } else {
+        col.column.clone()
+    }
+}
+
+fn binop_to_sql(op: &mlql_ir::BinOp) -> &'static str {
+    match op {
+        mlql_ir::BinOp::Add => "+",
+        mlql_ir::BinOp::Sub => "-",
+        mlql_ir::BinOp::Mul => "*",
+        mlql_ir::BinOp::Div => "/",
+        mlql_ir::BinOp::Mod => "%",
+        mlql_ir::BinOp::Eq => "=",
+        mlql_ir::BinOp::Ne => "!=",
+        mlql_ir::BinOp::Lt => "<",
+        mlql_ir::BinOp::Le => "<=",
+        mlql_ir::BinOp::Gt => ">",
+        mlql_ir::BinOp::Ge => ">=",
+        mlql_ir::BinOp::And => "AND",
+        mlql_ir::BinOp::Or => "OR",
+        mlql_ir::BinOp::Like => "LIKE",
+        mlql_ir::BinOp::ILike => "ILIKE",
+    }
+}
+
+fn literal_to_sql(val: &mlql_ir::Value) -> String {
+    match val {
+        mlql_ir::Value::Null => "NULL".to_string(),
+        mlql_ir::Value::Bool(b) => if *b { "TRUE".to_string() } else { "FALSE".to_string() },
+        mlql_ir::Value::Int(i) => i.to_string(),
+        mlql_ir::Value::Float(f) => f.to_string(),
+        mlql_ir::Value::String(s) => format!("'{}'", s.replace("'", "''")),  // Escape quotes
+        _ => "NULL".to_string(),  // TODO: Handle more value types
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
 
     #[test]
     fn test_executor_init() -> DuckResult<()> {
-        let executor = DuckExecutor::new()?;
-
-        // Verify Substrait extension is loaded
-        let mut stmt = executor.connection()
-            .prepare("SELECT * FROM duckdb_extensions() WHERE extension_name = 'substrait'")?;
-
-        let mut rows = stmt.query([])?;
-        assert!(rows.next()?.is_some(), "Substrait extension should be loaded");
-
+        let _executor = DuckExecutor::new()?;
         Ok(())
     }
 
@@ -203,19 +311,16 @@ mod tests {
         // 3. Convert AST to IR
         let ir_program = ast_program.to_ir();
 
-        // 4. Encode IR to Substrait JSON
-        let encoder = mlql_substrait::SubstraitEncoder::new();
-        let substrait_json = encoder.encode(&ir_program)?;
+        println!("IR: {:?}", ir_program);
 
-        println!("Substrait JSON:\n{}", substrait_json);
+        // 4. Execute via DuckDB (IR -> SQL)
+        let result = executor.execute_ir(&ir_program, None)?;
 
-        // 5. Execute via DuckDB
-        let result = executor.execute_substrait_json(&substrait_json, None)?;
-
-        // 6. Verify results
+        // 5. Verify results
         println!("Results: {:?}", result);
         assert_eq!(result.row_count, 2);
-        assert!(!result.columns.is_empty());
+        assert_eq!(result.columns.len(), 3);
+        assert_eq!(result.columns, vec!["id", "name", "age"]);
 
         Ok(())
     }
