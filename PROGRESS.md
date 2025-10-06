@@ -151,9 +151,30 @@ format!("SELECT {} FROM {}", select_clause, table)
 SELECT name, age FROM users WHERE (age > 25) ORDER BY age DESC LIMIT 10
 ```
 
+#### Phase 5: Distinct Operator ✅
+Implemented DISTINCT keyword support in SQL generation.
+
+**Tests Passing**:
+- ✅ `test_distinct_single_column` - SELECT DISTINCT city FROM users
+- ✅ `test_distinct_multiple_columns` - SELECT DISTINCT city, state FROM locations
+
+#### Phase 6: GroupBy Operator ✅
+Implemented GROUP BY with aggregate functions (sum, count, avg).
+
+**Implementation**:
+- GROUP BY keys become first columns in SELECT
+- Aggregate functions with user-defined aliases
+- Supports count(*), sum(col), avg(col), min(col), max(col)
+
+**Tests Passing**:
+- ✅ `test_group_by_simple` - SELECT city, count(*) AS total FROM orders GROUP BY city
+- ✅ `test_group_by_multiple_aggregates` - SELECT product, sum(qty) AS total_qty, avg(price) AS avg_price FROM sales GROUP BY product
+
+**Note**: Uses JSON IR format (LLM-friendly). MLQL text parser support for GROUP BY syntax to be added later.
+
 ### Test Summary
 
-**Total Tests Passing**: 18
+**Total Tests Passing**: 23
 
 #### mlql-ir (5 tests)
 - `test_fingerprint_deterministic`
@@ -167,7 +188,7 @@ SELECT name, age FROM users WHERE (age > 25) ORDER BY age DESC LIMIT 10
 - `test_parse_simple_query`
 - `test_parse_binary_expr`
 
-#### mlql-duck (10 tests)
+#### mlql-duck (14 tests)
 - `test_executor_init`
 - `test_end_to_end_simple_select`
 - `test_select_specific_columns`
@@ -178,6 +199,10 @@ SELECT name, age FROM users WHERE (age > 25) ORDER BY age DESC LIMIT 10
 - `test_filter_like_operator`
 - `test_llm_json_direct_execution`
 - `test_llm_json_with_complex_filter`
+- `test_distinct_single_column`
+- `test_distinct_multiple_columns`
+- `test_group_by_simple`
+- `test_group_by_multiple_aggregates`
 
 ### Commits on This Branch
 
@@ -198,15 +223,6 @@ SELECT name, age FROM users WHERE (age > 25) ORDER BY age DESC LIMIT 10
    - Cleanup
 
 ## Next Steps (TODO.md)
-
-### Phase 5: Distinct Operator 📋
-- [ ] Implement DISTINCT in IR-to-SQL
-- [ ] Test: `from users | select [name] | distinct`
-
-### Phase 6: GroupBy Operator 📋
-- [ ] Implement GROUP BY in IR-to-SQL
-- [ ] Support aggregate functions (sum, count, avg, min, max)
-- [ ] Test: `group by city { total: count(*) }`
 
 ### Phase 7: Join Operator 📋
 - [ ] Implement JOIN in IR-to-SQL (INNER, LEFT, RIGHT, FULL)
