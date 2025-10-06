@@ -78,30 +78,31 @@ SELECT DISTINCT city, state FROM locations
 All tests passing!
 
 ### Phase 6: GroupBy Operator
-**Status:** 📋 Planned
+**Status:** ✅ COMPLETED
 
 **Tasks:**
-- [ ] Implement GROUP BY in IR-to-SQL
-- [ ] Support aggregate functions (sum, count, avg, min, max)
-- [ ] Test simple groupby: `group by city { total: count(*) }`
-- [ ] Test with multiple aggregates
-- [ ] Test with having clause (if supported in IR)
+- [x] Implement GROUP BY in IR-to-SQL ✅
+- [x] Support aggregate functions (sum, count, avg, min, max) ✅
+- [x] Test simple groupby with count(*) ✅
+- [x] Test with multiple aggregates (sum, avg) ✅
 
-**Test Cases to Write:**
-```mlql
-// Simple count
-from users | group by city { total: count(*) }
+**Tests Added (Both Passing):**
+- `test_group_by_simple` - SELECT city, count(*) AS total FROM orders GROUP BY city
+- `test_group_by_multiple_aggregates` - SELECT product, sum(qty) AS total_qty, avg(price) AS avg_price FROM sales GROUP BY product
 
-// Multiple aggregates
-from users | group by city {
-  total: count(*),
-  avg_age: avg(age),
-  max_age: max(age)
-}
+**Implementation Details:**
+- GROUP BY keys become first columns in SELECT
+- Aggregate functions with aliases appended
+- Supports count(*), sum(col), avg(col), etc.
+- Uses JSON IR (parser support for GROUP BY syntax not yet implemented)
 
-// With filter after group
-from sales | group by product { revenue: sum(price * qty) } | filter revenue > 1000
+**SQL Generated:**
+```sql
+SELECT city, count(*) AS total FROM orders GROUP BY city
+SELECT product, sum(qty) AS total_qty, avg(price) AS avg_price FROM sales GROUP BY product
 ```
+
+All tests passing!
 
 ### Phase 7: Join Operator
 **Status:** 📋 Planned

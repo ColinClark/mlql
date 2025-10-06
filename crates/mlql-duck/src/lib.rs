@@ -186,6 +186,7 @@ fn ir_to_sql(program: &mlql_ir::Program) -> Result<String, ExecutionError> {
 fn build_sql_query(table: &str, operators: &[mlql_ir::Operator]) -> Result<String, ExecutionError> {
     let mut select_clause = "*".to_string();
     let mut where_clause = None;
+    let mut group_clause = None;
     let mut order_clause = None;
     let mut limit_clause = None;
     let mut distinct = false;
@@ -217,6 +218,34 @@ fn build_sql_query(table: &str, operators: &[mlql_ir::Operator]) -> Result<Strin
             mlql_ir::Operator::Filter { condition } => {
                 where_clause = Some(expr_to_sql(condition));
             }
+            mlql_ir::Operator::GroupBy { keys, aggs } => {
+                // Build GROUP BY keys
+                let group_keys: Vec<String> = keys.iter()
+                    .map(column_ref_to_sql)
+                    .collect();
+
+                // Build SELECT clause with keys + aggregates
+                let mut select_items = group_keys.clone();
+
+                for (alias, agg_call) in aggs.iter() {
+                    let agg_func = &agg_call.func;
+                    let agg_args: Vec<String> = agg_call.args.iter()
+                        .map(expr_to_sql)
+                        .collect();
+
+                    let agg_expr = if agg_args.is_empty() {
+                        // count(*) case
+                        format!("{}(*)", agg_func)
+                    } else {
+                        format!("{}({})", agg_func, agg_args.join(", "))
+                    };
+
+                    select_items.push(format!("{} AS {}", agg_expr, alias));
+                }
+
+                select_clause = select_items.join(", ");
+                group_clause = Some(group_keys.join(", "));
+            }
             mlql_ir::Operator::Sort { keys } => {
                 let order_items: Vec<String> = keys.iter().map(|key| {
                     let expr = expr_to_sql(&key.expr);
@@ -245,6 +274,10 @@ fn build_sql_query(table: &str, operators: &[mlql_ir::Operator]) -> Result<Strin
 
     if let Some(where_sql) = where_clause {
         sql.push_str(&format!(" WHERE {}", where_sql));
+    }
+
+    if let Some(group_sql) = group_clause {
+        sql.push_str(&format!(" GROUP BY {}", group_sql));
     }
 
     if let Some(order_sql) = order_clause {
@@ -690,6 +723,111 @@ mod tests {
         println!("Distinct Multi-Column Results: {:?}", result);
         assert_eq!(result.row_count, 2);
         assert_eq!(result.columns, vec!["city", "state"]);
+
+        Ok(())
+    }
+
+    #[test]
+    fn test_group_by_simple() -> Result<(), Box<dyn std::error::Error>> {
+        // Setup
+        let executor = DuckExecutor::new()?;
+        executor.connection().execute_batch(
+            "CREATE TABLE orders (id INTEGER, city VARCHAR, amount DECIMAL);
+             INSERT INTO orders VALUES
+                (1, 'NYC', 100.0),
+                (2, 'LA', 150.0),
+                (3, 'NYC', 200.0),
+                (4, 'LA', 75.0);"
+        )?;
+
+        // Test GROUP BY with JSON IR (since parser doesn't support it yet)
+        let json_ir = r#"{
+            "pipeline": {
+                "source": {
+                    "type": "Table",
+                    "name": "orders"
+                },
+                "ops": [
+                    {
+                        "op": "GroupBy",
+                        "keys": [{"column": "city"}],
+                        "aggs": {
+                            "total": {
+                                "func": "count",
+                                "args": []
+                            }
+                        }
+                    }
+                ]
+            }
+        }"#;
+
+        let ir_program: mlql_ir::Program = serde_json::from_str(json_ir)?;
+        let result = executor.execute_ir(&ir_program, None)?;
+
+        // Verify: Should return 2 rows (NYC, LA) with counts
+        println!("GroupBy Results: {:?}", result);
+        assert_eq!(result.row_count, 2);
+        assert_eq!(result.columns, vec!["city", "total"]);
+
+        Ok(())
+    }
+
+    #[test]
+    fn test_group_by_multiple_aggregates() -> Result<(), Box<dyn std::error::Error>> {
+        // Setup
+        let executor = DuckExecutor::new()?;
+        executor.connection().execute_batch(
+            "CREATE TABLE sales (id INTEGER, product VARCHAR, price DECIMAL, qty INTEGER);
+             INSERT INTO sales VALUES
+                (1, 'Widget', 10.0, 5),
+                (2, 'Widget', 12.0, 3),
+                (3, 'Gadget', 20.0, 2),
+                (4, 'Gadget', 18.0, 4);"
+        )?;
+
+        // Test GROUP BY with multiple aggregates
+        let json_ir = r#"{
+            "pipeline": {
+                "source": {
+                    "type": "Table",
+                    "name": "sales"
+                },
+                "ops": [
+                    {
+                        "op": "GroupBy",
+                        "keys": [{"column": "product"}],
+                        "aggs": {
+                            "total_qty": {
+                                "func": "sum",
+                                "args": [
+                                    {"type": "Column", "col": {"column": "qty"}}
+                                ]
+                            },
+                            "avg_price": {
+                                "func": "avg",
+                                "args": [
+                                    {"type": "Column", "col": {"column": "price"}}
+                                ]
+                            }
+                        }
+                    }
+                ]
+            }
+        }"#;
+
+        let ir_program: mlql_ir::Program = serde_json::from_str(json_ir)?;
+        let result = executor.execute_ir(&ir_program, None)?;
+
+        // Verify: Should return 2 products with aggregates
+        println!("GroupBy Multi-Agg Results: {:?}", result);
+        assert_eq!(result.row_count, 2);
+
+        // Check columns (order may vary due to HashMap)
+        assert!(result.columns.contains(&"product".to_string()));
+        assert!(result.columns.contains(&"total_qty".to_string()));
+        assert!(result.columns.contains(&"avg_price".to_string()));
+        assert_eq!(result.columns.len(), 3);
 
         Ok(())
     }
