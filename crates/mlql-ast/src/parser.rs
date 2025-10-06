@@ -21,7 +21,6 @@ pub enum ParseError {
 
 /// Parse MLQL source text into AST
 pub fn parse(source: &str) -> Result<Program, ParseError> {
-    use pest::iterators::Pair;
 
     let mut pairs = MlqlParser::parse(Rule::program, source)?;
     let program_pair = pairs.next().ok_or_else(|| ParseError::Syntax("Empty input".to_string()))?;
@@ -53,7 +52,7 @@ pub fn parse(source: &str) -> Result<Program, ParseError> {
     })
 }
 
-fn parse_pragma(pair: pest::iterators::Pair<Rule>) -> Result<Pragma, ParseError> {
+fn parse_pragma(_pair: pest::iterators::Pair<Rule>) -> Result<Pragma, ParseError> {
     // TODO: Implement pragma parsing
     Ok(Pragma { options: vec![] })
 }

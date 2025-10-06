@@ -47,6 +47,7 @@ pub enum EncodingError {
 }
 
 pub struct SubstraitEncoder {
+    #[allow(dead_code)]
     registry: mlql_registry::FunctionRegistry,
 }
 
@@ -105,6 +106,7 @@ impl SubstraitEncoder {
                 patch_number: 0,
                 ..Default::default()
             }),
+            #[allow(deprecated)]
             extension_uris: extensions.uris,
             extension_urns: vec![],  // URNs (newer format)
             extensions: extensions.functions,
@@ -226,7 +228,7 @@ impl SubstraitEncoder {
 
     fn encode_expr(&self, expr: &mlql_ir::Expr) -> Result<Expression, EncodingError> {
         match expr {
-            mlql_ir::Expr::Column { col } => {
+            mlql_ir::Expr::Column { col: _ } => {
                 // Simple column reference
                 Ok(Expression {
                     rex_type: Some(expression::RexType::Selection(Box::new(
