@@ -185,6 +185,7 @@ fn ir_to_sql(program: &mlql_ir::Program) -> Result<String, ExecutionError> {
 /// Build SQL query from table and operators
 fn build_sql_query(table: &str, operators: &[mlql_ir::Operator]) -> Result<String, ExecutionError> {
     let mut select_clause = "*".to_string();
+    let mut from_clause = table.to_string();
     let mut where_clause = None;
     let mut group_clause = None;
     let mut order_clause = None;
@@ -217,6 +218,36 @@ fn build_sql_query(table: &str, operators: &[mlql_ir::Operator]) -> Result<Strin
             }
             mlql_ir::Operator::Filter { condition } => {
                 where_clause = Some(expr_to_sql(condition));
+            }
+            mlql_ir::Operator::Join { source, on, join_type } => {
+                // Build JOIN clause
+                let join_type_sql = match join_type {
+                    Some(mlql_ir::JoinType::Inner) | None => "INNER JOIN",
+                    Some(mlql_ir::JoinType::Left) => "LEFT JOIN",
+                    Some(mlql_ir::JoinType::Right) => "RIGHT JOIN",
+                    Some(mlql_ir::JoinType::Full) => "FULL OUTER JOIN",
+                    Some(mlql_ir::JoinType::Cross) => "CROSS JOIN",
+                    Some(mlql_ir::JoinType::Semi) => return Err(ExecutionError::SubstraitError("SEMI JOIN not yet supported".to_string())),
+                    Some(mlql_ir::JoinType::Anti) => return Err(ExecutionError::SubstraitError("ANTI JOIN not yet supported".to_string())),
+                };
+
+                // Get the source table/alias
+                let source_sql = match source {
+                    mlql_ir::Source::Table { name, alias } => {
+                        if let Some(a) = alias {
+                            format!("{} AS {}", name, a)
+                        } else {
+                            name.clone()
+                        }
+                    }
+                    _ => return Err(ExecutionError::SubstraitError("Unsupported JOIN source type".to_string())),
+                };
+
+                // Build ON condition
+                let on_condition = expr_to_sql(on);
+
+                // Append to FROM clause
+                from_clause.push_str(&format!(" {} {} ON {}", join_type_sql, source_sql, on_condition));
             }
             mlql_ir::Operator::GroupBy { keys, aggs } => {
                 // Build GROUP BY keys
@@ -270,7 +301,7 @@ fn build_sql_query(table: &str, operators: &[mlql_ir::Operator]) -> Result<Strin
 
     // Build final SQL
     let distinct_sql = if distinct { "DISTINCT " } else { "" };
-    let mut sql = format!("SELECT {}{} FROM {}", distinct_sql, select_clause, table);
+    let mut sql = format!("SELECT {}{} FROM {}", distinct_sql, select_clause, from_clause);
 
     if let Some(where_sql) = where_clause {
         sql.push_str(&format!(" WHERE {}", where_sql));
@@ -828,6 +859,180 @@ mod tests {
         assert!(result.columns.contains(&"total_qty".to_string()));
         assert!(result.columns.contains(&"avg_price".to_string()));
         assert_eq!(result.columns.len(), 3);
+
+        Ok(())
+    }
+
+    #[test]
+    fn test_join_inner() -> Result<(), Box<dyn std::error::Error>> {
+        // Setup
+        let executor = DuckExecutor::new()?;
+        executor.connection().execute_batch(
+            "CREATE TABLE users (id INTEGER, name VARCHAR);
+             CREATE TABLE orders (id INTEGER, user_id INTEGER, amount DECIMAL);
+             INSERT INTO users VALUES (1, 'Alice'), (2, 'Bob');
+             INSERT INTO orders VALUES (101, 1, 100.0), (102, 1, 150.0), (103, 2, 200.0);"
+        )?;
+
+        // Test INNER JOIN using JSON IR
+        let json_ir = r#"{
+            "pipeline": {
+                "source": {
+                    "type": "Table",
+                    "name": "users",
+                    "alias": "u"
+                },
+                "ops": [
+                    {
+                        "op": "Join",
+                        "source": {
+                            "type": "Table",
+                            "name": "orders",
+                            "alias": "o"
+                        },
+                        "on": {
+                            "type": "BinaryOp",
+                            "op": "Eq",
+                            "left": {
+                                "type": "Column",
+                                "col": {"table": "u", "column": "id"}
+                            },
+                            "right": {
+                                "type": "Column",
+                                "col": {"table": "o", "column": "user_id"}
+                            }
+                        },
+                        "join_type": "Inner"
+                    }
+                ]
+            }
+        }"#;
+
+        let ir_program: mlql_ir::Program = serde_json::from_str(json_ir)?;
+        let result = executor.execute_ir(&ir_program, None)?;
+
+        // Verify: Should return 3 rows (all orders matched with users)
+        println!("INNER JOIN Results: {:?}", result);
+        assert_eq!(result.row_count, 3);
+
+        Ok(())
+    }
+
+    #[test]
+    fn test_join_left() -> Result<(), Box<dyn std::error::Error>> {
+        // Setup
+        let executor = DuckExecutor::new()?;
+        executor.connection().execute_batch(
+            "CREATE TABLE users (id INTEGER, name VARCHAR);
+             CREATE TABLE orders (id INTEGER, user_id INTEGER, amount DECIMAL);
+             INSERT INTO users VALUES (1, 'Alice'), (2, 'Bob'), (3, 'Charlie');
+             INSERT INTO orders VALUES (101, 1, 100.0), (102, 2, 150.0);"
+        )?;
+
+        // Test LEFT JOIN using JSON IR
+        let json_ir = r#"{
+            "pipeline": {
+                "source": {
+                    "type": "Table",
+                    "name": "users",
+                    "alias": "u"
+                },
+                "ops": [
+                    {
+                        "op": "Join",
+                        "source": {
+                            "type": "Table",
+                            "name": "orders",
+                            "alias": "o"
+                        },
+                        "on": {
+                            "type": "BinaryOp",
+                            "op": "Eq",
+                            "left": {
+                                "type": "Column",
+                                "col": {"table": "u", "column": "id"}
+                            },
+                            "right": {
+                                "type": "Column",
+                                "col": {"table": "o", "column": "user_id"}
+                            }
+                        },
+                        "join_type": "Left"
+                    }
+                ]
+            }
+        }"#;
+
+        let ir_program: mlql_ir::Program = serde_json::from_str(json_ir)?;
+        let result = executor.execute_ir(&ir_program, None)?;
+
+        // Verify: Should return 3 rows (all users, including Charlie with NULL order)
+        println!("LEFT JOIN Results: {:?}", result);
+        assert_eq!(result.row_count, 3);
+
+        Ok(())
+    }
+
+    #[test]
+    fn test_join_multiple() -> Result<(), Box<dyn std::error::Error>> {
+        // Setup
+        let executor = DuckExecutor::new()?;
+        executor.connection().execute_batch(
+            "CREATE TABLE users (id INTEGER, name VARCHAR);
+             CREATE TABLE orders (id INTEGER, user_id INTEGER, product_id INTEGER);
+             CREATE TABLE products (id INTEGER, name VARCHAR);
+             INSERT INTO users VALUES (1, 'Alice');
+             INSERT INTO orders VALUES (101, 1, 201);
+             INSERT INTO products VALUES (201, 'Widget');"
+        )?;
+
+        // Test multiple JOINs using JSON IR
+        let json_ir = r#"{
+            "pipeline": {
+                "source": {
+                    "type": "Table",
+                    "name": "users",
+                    "alias": "u"
+                },
+                "ops": [
+                    {
+                        "op": "Join",
+                        "source": {
+                            "type": "Table",
+                            "name": "orders",
+                            "alias": "o"
+                        },
+                        "on": {
+                            "type": "BinaryOp",
+                            "op": "Eq",
+                            "left": {"type": "Column", "col": {"table": "u", "column": "id"}},
+                            "right": {"type": "Column", "col": {"table": "o", "column": "user_id"}}
+                        }
+                    },
+                    {
+                        "op": "Join",
+                        "source": {
+                            "type": "Table",
+                            "name": "products",
+                            "alias": "p"
+                        },
+                        "on": {
+                            "type": "BinaryOp",
+                            "op": "Eq",
+                            "left": {"type": "Column", "col": {"table": "o", "column": "product_id"}},
+                            "right": {"type": "Column", "col": {"table": "p", "column": "id"}}
+                        }
+                    }
+                ]
+            }
+        }"#;
+
+        let ir_program: mlql_ir::Program = serde_json::from_str(json_ir)?;
+        let result = executor.execute_ir(&ir_program, None)?;
+
+        // Verify: Should return 1 row joining all 3 tables
+        println!("Multiple JOIN Results: {:?}", result);
+        assert_eq!(result.row_count, 1);
 
         Ok(())
     }

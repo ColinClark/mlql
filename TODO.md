@@ -105,27 +105,34 @@ SELECT product, sum(qty) AS total_qty, avg(price) AS avg_price FROM sales GROUP 
 All tests passing!
 
 ### Phase 7: Join Operator
-**Status:** 📋 Planned
+**Status:** ✅ COMPLETED
 
 **Tasks:**
-- [ ] Implement JOIN in IR-to-SQL (INNER, LEFT, RIGHT, FULL)
-- [ ] Test simple join: `join from orders on users.id == orders.user_id`
-- [ ] Test with join type: `join from orders on users.id == orders.user_id type: left`
-- [ ] Test multiple joins (chained)
+- [x] Implement JOIN in IR-to-SQL (INNER, LEFT, RIGHT, FULL, CROSS) ✅
+- [x] Test INNER JOIN with ON condition ✅
+- [x] Test LEFT JOIN ✅
+- [x] Test multiple joins (3 tables) ✅
 
-**Test Cases to Write:**
-```mlql
-// Inner join
-from users | join from orders on users.id == orders.user_id
+**Tests Added (All Passing):**
+- `test_join_inner` - SELECT * FROM users INNER JOIN orders ON condition
+- `test_join_left` - SELECT * FROM users LEFT JOIN orders ON condition
+- `test_join_multiple` - Chained JOINs across 3 tables (users → orders → products)
 
-// Left join
-from users | join from orders on users.id == orders.user_id type: left
+**Implementation Details:**
+- JOIN modifies FROM clause instead of adding WHERE conditions
+- Supports INNER, LEFT, RIGHT, FULL OUTER, CROSS JOIN types
+- Multiple JOINs chain in FROM clause
+- ON conditions use expr_to_sql()
+- SEMI/ANTI joins not yet supported
 
-// Multi-table join
-from users
-| join from orders on users.id == orders.user_id
-| join from products on orders.product_id == products.id
+**SQL Generated:**
+```sql
+SELECT * FROM users AS u INNER JOIN orders AS o ON (u.id = o.user_id)
+SELECT * FROM users AS u LEFT JOIN orders AS o ON (u.id = o.user_id)
+SELECT * FROM users AS u INNER JOIN orders AS o ON (u.id = o.user_id) INNER JOIN products AS p ON (o.product_id = p.id)
 ```
+
+All tests passing!
 
 ### Phase 8: Union/Except/Intersect
 **Status:** 📋 Planned
