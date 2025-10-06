@@ -1,0 +1,59 @@
+[workspace]
+resolver = "2"
+members = [
+    "crates/mlql-ast",
+    "crates/mlql-ir",
+    "crates/mlql-registry",
+    "crates/mlql-substrait",
+    "crates/mlql-duck",
+    "crates/mlql-server",
+]
+
+[workspace.package]
+version = "0.1.0"
+edition = "2021"
+license = "MIT OR Apache-2.0"
+repository = "https://github.com/yourusername/mlql-rs"
+
+[workspace.dependencies]
+# Parsing
+pest = "2.7"
+pest_derive = "2.7"
+
+# Serialization
+serde = { version = "1.0", features = ["derive"] }
+serde_json = "1.0"
+
+# Substrait
+prost = "0.14"
+prost-types = "0.14"
+prost-reflect = { version = "0.16", features = ["serde", "derive"] }
+
+# Database
+duckdb = { version = "1.3", features = ["bundled"] }
+arrow = "53"
+
+# Async runtime (for server)
+tokio = { version = "1", features = ["full"] }
+axum = { version = "0.7" }
+
+# Error handling
+thiserror = "2.0"
+anyhow = "1.0"
+
+# Logging/Tracing
+tracing = "0.1"
+tracing-subscriber = { version = "0.3", features = ["env-filter"] }
+
+# Observability
+prometheus = "0.13"
+
+# Utilities
+chrono = { version = "0.4", features = ["serde"] }
+uuid = { version = "1.0", features = ["v4", "serde"] }
+sha2 = "0.10"
+
+[profile.release]
+lto = true
+codegen-units = 1
+opt-level = 3

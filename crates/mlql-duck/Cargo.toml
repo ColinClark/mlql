@@ -1,0 +1,16 @@
+[package]
+name = "mlql-duck"
+version.workspace = true
+edition.workspace = true
+
+[dependencies]
+mlql-ir = { path = "../mlql-ir" }
+mlql-substrait = { path = "../mlql-substrait" }
+duckdb.workspace = true
+arrow.workspace = true
+thiserror.workspace = true
+serde_json.workspace = true
+tracing.workspace = true
+
+[dev-dependencies]
+mlql-ast = { path = "../mlql-ast" }

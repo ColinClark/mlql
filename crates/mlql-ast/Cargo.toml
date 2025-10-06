@@ -1,0 +1,12 @@
+[package]
+name = "mlql-ast"
+version.workspace = true
+edition.workspace = true
+
+[dependencies]
+mlql-ir = { path = "../mlql-ir" }
+pest.workspace = true
+pest_derive.workspace = true
+thiserror.workspace = true
+serde.workspace = true
+serde_json.workspace = true

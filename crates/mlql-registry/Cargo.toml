@@ -1,0 +1,10 @@
+[package]
+name = "mlql-registry"
+version.workspace = true
+edition.workspace = true
+
+[dependencies]
+mlql-ir = { path = "../mlql-ir" }
+serde.workspace = true
+serde_json.workspace = true
+thiserror.workspace = true

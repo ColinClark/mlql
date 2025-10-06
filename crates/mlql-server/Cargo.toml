@@ -1,0 +1,20 @@
+[package]
+name = "mlql-server"
+version.workspace = true
+edition.workspace = true
+
+[dependencies]
+mlql-ast = { path = "../mlql-ast" }
+mlql-ir = { path = "../mlql-ir" }
+mlql-registry = { path = "../mlql-registry" }
+mlql-substrait = { path = "../mlql-substrait" }
+mlql-duck = { path = "../mlql-duck" }
+
+tokio.workspace = true
+axum.workspace = true
+serde.workspace = true
+serde_json.workspace = true
+thiserror.workspace = true
+tracing.workspace = true
+tracing-subscriber.workspace = true
+prometheus.workspace = true

@@ -1,0 +1,190 @@
+// MLQL Pest Grammar
+// Based on EBNF specification
+
+WHITESPACE = _{ " " | "\t" | "\r" | "\n" }
+COMMENT = _{ line_comment | block_comment }
+line_comment = { "//" ~ (!"\n" ~ ANY)* ~ ("\n" | EOI) }
+block_comment = { "/*" ~ (!"*/" ~ ANY)* ~ "*/" }
+
+// ======================== LEXICAL RULES ========================
+
+ident = @{ ident_start ~ ident_part* }
+ident_start = _{ "_" | LETTER }
+ident_part = _{ "_" | LETTER | NUMBER }
+
+int = @{ "-"? ~ ASCII_DIGIT+ }
+decimal = @{ "-"? ~ ASCII_DIGIT+ ~ "." ~ ASCII_DIGIT+ }
+exp = @{ (int | decimal) ~ ("e" | "E") ~ ("-" | "+")? ~ ASCII_DIGIT+ }
+
+string = @{ "\"" ~ string_char* ~ "\"" }
+string_char = { (!("\"" | NEWLINE) ~ ANY) | "\\" ~ ("\"" | "n" | "t" | "r" | "\\") }
+
+bytes_lit = @{ "0x" ~ hex+ }
+hex = { ASCII_HEX_DIGIT }
+
+date_lit = @{ ASCII_DIGIT+ ~ "-" ~ ASCII_DIGIT+ ~ "-" ~ ASCII_DIGIT+ }
+time_lit = @{ ASCII_DIGIT+ ~ ":" ~ ASCII_DIGIT+ ~ (":" ~ ASCII_DIGIT+ ~ ("." ~ ASCII_DIGIT+)?)? }
+ts_lit = @{ date_lit ~ "T" ~ time_lit ~ ("Z" | tz_offset)? }
+tz_offset = @{ ("+" | "-") ~ ASCII_DIGIT+ ~ ":" ~ ASCII_DIGIT+ }
+
+bool_lit = { "true" | "false" }
+null_lit = { "null" }
+
+// ======================== TOP-LEVEL ========================
+
+program = { SOI ~ pragma_block? ~ let_stmt* ~ pipeline ~ EOI }
+
+pragma_block = { "pragma" ~ obj }
+
+let_stmt = { "let" ~ ident ~ "=" ~ pipeline }
+
+pipeline = { source ~ ("|" ~ op)* }
+
+source = { "from" ~ source_body ~ alias? }
+source_body = {
+    ident |
+    ("graph" ~ "(" ~ ident ~ ")" ~ ident) |
+    ("(" ~ pipeline ~ ")")
+}
+
+alias = { ident }
+
+op = {
+    select_op | filter_op | join_op | group_op | window_op | sort_op | take_op |
+    distinct_op | union_op | setdiff_op | intersect_op | map_op | expand_op |
+    resample_op | agg_op | knn_op | rank_op | neighbors_op | topk_op |
+    sample_op | assert_op | explain_op
+}
+
+// ======================== OPERATORS ========================
+
+select_op = { "select" ~ "[" ~ proj_list ~ "]" }
+proj_list = { proj_item ~ ("," ~ proj_item)* }
+proj_item = { (ident ~ "as" ~ ident) | expr }
+
+filter_op = { "filter" ~ expr }
+
+join_op = { "join" ~ source ~ "on" ~ expr ~ join_tail? }
+join_tail = { "type:" ~ join_type }
+join_type = { "inner" | "left" | "right" | "full" | "semi" | "anti" | "cross" }
+
+group_op = { "group" ~ "by" ~ col_list ~ "{" ~ agg_list ~ "}" }
+col_list = { col_ref ~ ("," ~ col_ref)* }
+col_ref = { ident ~ ("." ~ ident)? }
+
+agg_list = { agg_item ~ ("," ~ agg_item)* }
+agg_item = { ident ~ ":" ~ agg_call }
+agg_call = { func_call }
+
+window_op = { "window" ~ "{" ~ win_list ~ "}" }
+win_list = { win_def ~ ("," ~ win_def)* }
+win_def = { ident ~ ":" ~ win_func }
+win_func = { ident ~ "(" ~ arg_list? ~ ")" ~ "over" ~ win_spec }
+win_spec = { ("part:" ~ col_list)? ~ ("order:" ~ sort_keys)? ~ ("frame:" ~ frame_spec)? }
+frame_spec = { ("rows" | "range") ~ frame_bound }
+frame_bound = { "[" ~ frame_edge ~ "," ~ frame_edge ~ "]" }
+frame_edge = {
+    "unbounded_preceding" | "unbounded_following" | "current_row" |
+    (int ~ "preceding") | (int ~ "following")
+}
+
+sort_op = { "sort" ~ sort_keys }
+sort_keys = { sort_key ~ ("," ~ sort_key)* }
+sort_key = { "-"? ~ expr }
+
+take_op = { "take" ~ int }
+
+distinct_op = { "distinct" }
+
+union_op = { "union" ~ "all"? }
+setdiff_op = { "except" }
+intersect_op = { "intersect" }
+
+map_op = { "map" ~ "{" ~ map_list ~ "}" }
+map_list = { map_item ~ ("," ~ map_item)* }
+map_item = { ident ~ ":" ~ expr }
+
+expand_op = { "expand" ~ expr ~ ("as" ~ ident)? }
+
+resample_op = { "resample" ~ int ~ ("m" | "s" | "h") ~ "method:" ~ ident ~ "on:" ~ col_ref }
+
+agg_op = { "agg" ~ "by" ~ group_key ~ "{" ~ agg_list ~ "}" }
+group_key = {
+    ("tumbling" ~ "(" ~ expr ~ "," ~ interval ~ ")") |
+    ("hopping" ~ "(" ~ expr ~ "," ~ interval ~ "," ~ interval ~ ")") |
+    ("session" ~ "(" ~ expr ~ "," ~ interval ~ ")")
+}
+
+interval = @{ int ~ ("s" | "m" | "h" | "d") }
+
+knn_op = { "knn" ~ "q:" ~ expr ~ "k:" ~ int ~ ("index:" ~ ident)? ~ ("metric:" ~ ident)? }
+
+rank_op = { "rank" ~ "by" ~ expr }
+
+neighbors_op = { "neighbors" ~ "start:" ~ expr ~ "depth:" ~ int ~ ("edge:" ~ ident)? }
+
+topk_op = { "topk" ~ int ~ "by" ~ expr }
+
+sample_op = { "sample" ~ decimal ~ ("seed:" ~ int)? }
+
+assert_op = { "assert" ~ expr ~ string? }
+
+explain_op = { "explain" ~ ("logical" | "physical" | "cost") }
+
+// ======================== EXPRESSIONS ========================
+
+arg_list = { expr ~ ("," ~ expr)* }
+
+expr = { or_expr }
+
+or_expr = { and_expr ~ ("||" ~ and_expr)* }
+and_expr = { not_expr ~ ("&&" ~ not_expr)* }
+not_expr = { "!"? ~ cmp_expr }
+
+cmp_expr = { add_expr ~ (cmp_op ~ add_expr)* }
+cmp_op = {
+    "==" | "!=" | "<=" | ">=" | "<" | ">" |
+    ("in" ~ range_or_set) |
+    "like" | "ilike"
+}
+
+range_or_set = {
+    ("[" ~ expr ~ "," ~ expr ~ (")" | "]")) |
+    ("(" ~ (expr ~ ("," ~ expr)*)? ~ ")")
+}
+
+add_expr = { mul_expr ~ (("+" | "-") ~ mul_expr)* }
+mul_expr = { unary_expr ~ (("*" | "/" | "%") ~ unary_expr)* }
+unary_expr = { ("-" | "+")? ~ postfix }
+
+postfix = { primary ~ postfix_tail* }
+postfix_tail = {
+    ("." ~ ident) |
+    ("[" ~ expr ~ "]") |
+    ("(" ~ arg_list? ~ ")")
+}
+
+primary = {
+    literal |
+    col_ref |
+    ("(" ~ expr ~ ")") |
+    func_call |
+    obj |
+    array |
+    vector_lit
+}
+
+func_call = { ident ~ "(" ~ arg_list? ~ ")" }
+
+literal = {
+    exp | decimal | int | string | bytes_lit |
+    bool_lit | date_lit | time_lit | ts_lit | null_lit
+}
+
+array = { "[" ~ (expr ~ ("," ~ expr)*)? ~ "]" }
+
+vector_lit = { "<" ~ decimal ~ ("," ~ decimal)* ~ ">" }
+
+obj = { "{" ~ (obj_pair ~ ("," ~ obj_pair)*)? ~ "}" }
+obj_pair = { (ident | string) ~ ":" ~ obj_val }
+obj_val = { expr | obj | array }
