@@ -17,3 +17,5 @@ thiserror.workspace = true
 tracing.workspace = true
 tracing-subscriber.workspace = true
 prometheus.workspace = true
+async-openai.workspace = true
+dotenvy.workspace = true

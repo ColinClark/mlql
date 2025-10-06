@@ -48,6 +48,10 @@ chrono = { version = "0.4", features = ["serde"] }
 uuid = { version = "1.0", features = ["v4", "serde"] }
 sha2 = "0.10"
 
+# LLM Integration
+async-openai = "0.28"
+dotenvy = "0.15"
+
 [profile.release]
 lto = true
 codegen-units = 1
