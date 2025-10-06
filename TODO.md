@@ -135,28 +135,31 @@ SELECT * FROM users AS u INNER JOIN orders AS o ON (u.id = o.user_id) INNER JOIN
 All tests passing!
 
 ### Phase 8: Union/Except/Intersect
-**Status:** 📋 Planned
+**Status:** ⏸️ DEFERRED (Architectural Decision Needed)
 
-**Tasks:**
-- [ ] Implement UNION/UNION ALL
-- [ ] Implement EXCEPT
-- [ ] Implement INTERSECT
-- [ ] Test set operations
-
-**Test Cases to Write:**
-```mlql
-// Union
-from current_users | union | from archived_users
-
-// Union all
-from sales_2023 | union all | from sales_2024
-
-// Except
-from all_users | except | from banned_users
-
-// Intersect
-from premium_users | intersect | from active_users
+**Reason for Deferral:**
+UNION/EXCEPT/INTERSECT are binary set operations that combine **two complete queries**:
+```sql
+SELECT * FROM table1 UNION SELECT * FROM table2
 ```
+
+The current pipeline architecture processes operators sequentially on a single source. Set operations require:
+1. Two separate pipelines/queries to combine
+2. Different SQL generation strategy
+
+**Options for Future Implementation:**
+1. Add a `right_pipeline` field to Union/Except/Intersect operators in IR
+2. Implement at query combiner level (above single pipeline)
+3. Support via CTE (Common Table Expressions):
+   ```sql
+   WITH q1 AS (SELECT * FROM t1),
+        q2 AS (SELECT * FROM t2)
+   SELECT * FROM q1 UNION SELECT * FROM q2
+   ```
+
+**Documented in**: `test_union_note()` in mlql-duck
+
+**Priority**: Low - Core SQL operators (SELECT, WHERE, JOIN, GROUP BY, ORDER BY, DISTINCT) are complete
 
 ## Phase 9: Error Handling & Edge Cases
 **Status:** 📋 Planned

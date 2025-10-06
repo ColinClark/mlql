@@ -1036,4 +1036,19 @@ mod tests {
 
         Ok(())
     }
+
+    #[test]
+    fn test_union_note() -> Result<(), Box<dyn std::error::Error>> {
+        // Note: UNION/EXCEPT/INTERSECT are binary set operations that combine two queries.
+        // In SQL: SELECT * FROM t1 UNION SELECT * FROM t2
+        // However, in the current pipeline architecture, operators modify a single pipeline.
+        //
+        // Proper implementation would require:
+        // 1. Either: Store a second pipeline/source in the operator
+        // 2. Or: Generate SQL differently for set operations
+        //
+        // For now, documenting this limitation. These operators would be better
+        // implemented as a separate query combiner at a higher level.
+        Ok(())
+    }
 }
