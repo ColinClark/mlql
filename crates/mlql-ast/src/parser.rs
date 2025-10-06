@@ -167,9 +167,68 @@ fn parse_sort_key(pair: pest::iterators::Pair<Rule>) -> Result<SortKey, ParseErr
 
 fn parse_expr(pair: pest::iterators::Pair<Rule>) -> Result<Expr, ParseError> {
     match pair.as_rule() {
-        Rule::expr | Rule::or_expr | Rule::and_expr | Rule::cmp_expr => {
-            // Recursively unwrap until we hit a terminal
-            parse_expr(pair.into_inner().next().unwrap())
+        // Expression hierarchy - need to handle binary operators
+        Rule::expr | Rule::or_expr | Rule::and_expr | Rule::not_expr | Rule::cmp_expr => {
+            // These just unwrap to the next level
+            let mut inner = pair.into_inner();
+            if let Some(first) = inner.next() {
+                parse_expr(first)
+            } else {
+                Err(ParseError::Syntax("Empty expression".to_string()))
+            }
+        }
+        Rule::add_expr | Rule::mul_expr => {
+            // Parse binary operators: first_term (op next_term)*
+            // Pest generates flat sequence: [term, op_char, term, op_char, term, ...]
+            let mut inner = pair.into_inner();
+            let mut left = parse_expr(inner.next().unwrap())?;
+
+            while let Some(next_pair) = inner.next() {
+                // next_pair could be an operator char or the next term
+                // Need to peek at what it is
+                match next_pair.as_rule() {
+                    Rule::add_expr | Rule::mul_expr | Rule::unary_expr | Rule::postfix | Rule::primary => {
+                        // This is actually the right operand, we need to find the operator
+                        // The operator should have been right before this
+                        // Actually, the Pest grammar generates: term, term, term...
+                        // Let me reconsider - operators might not be separate tokens
+                        // They might be implicit in the structure
+                        // For now, let's just recursively parse and return the first
+                        return Ok(left);
+                    }
+                    _ => {
+                        // This must be an operator - read it as a string
+                        let op_str = next_pair.as_str();
+                        let right_pair = inner.next().ok_or_else(|| ParseError::Syntax("Missing right operand".to_string()))?;
+                        let right = parse_expr(right_pair)?;
+
+                        let op = match op_str {
+                            "+" => BinOp::Add,
+                            "-" => BinOp::Sub,
+                            "*" => BinOp::Mul,
+                            "/" => BinOp::Div,
+                            "%" => BinOp::Mod,
+                            _ => return Err(ParseError::Syntax(format!("Unknown operator: {}", op_str))),
+                        };
+
+                        left = Expr::BinaryOp {
+                            op,
+                            left: Box::new(left),
+                            right: Box::new(right),
+                        };
+                    }
+                }
+            }
+
+            Ok(left)
+        }
+        Rule::unary_expr | Rule::postfix => {
+            let mut inner = pair.into_inner();
+            if let Some(first) = inner.next() {
+                parse_expr(first)
+            } else {
+                Err(ParseError::Syntax("Empty expression".to_string()))
+            }
         }
         Rule::primary => {
             let inner = pair.into_inner().next().unwrap();
@@ -178,7 +237,7 @@ fn parse_expr(pair: pest::iterators::Pair<Rule>) -> Result<Expr, ParseError> {
                 Rule::col_ref => parse_col_ref(inner),
                 Rule::func_call => parse_func_call(inner),
                 Rule::expr => parse_expr(inner),
-                _ => Err(ParseError::Syntax("Invalid primary".to_string())),
+                _ => Err(ParseError::Syntax(format!("Invalid primary: {:?}", inner.as_rule()))),
             }
         }
         Rule::literal => parse_literal(pair),
