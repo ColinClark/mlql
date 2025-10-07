@@ -1,6 +1,6 @@
 //! Core Substrait translator
 
-use crate::{Program, Pipeline, Source, Operator, Expr, Value, BinOp, UnOp, ColumnRef};
+use crate::{Program, Pipeline, Source, Operator, Expr, Value, BinOp, UnOp, ColumnRef, Projection};
 use super::schema::SchemaProvider;
 use substrait::proto::Plan;
 
@@ -89,6 +89,7 @@ impl<'a> SubstraitTranslator<'a> {
     fn translate_operator(&self, op: &Operator, input: substrait::proto::Rel, schema: &[String]) -> Result<substrait::proto::Rel, TranslateError> {
         match op {
             Operator::Filter { condition } => self.translate_filter(input, condition, schema),
+            Operator::Select { projections } => self.translate_select(input, projections, schema),
             _ => Err(TranslateError::UnsupportedOperator(format!("Operator {:?} not yet supported", op))),
         }
     }
@@ -108,6 +109,35 @@ impl<'a> SubstraitTranslator<'a> {
         // Wrap in Rel
         Ok(substrait::proto::Rel {
             rel_type: Some(substrait::proto::rel::RelType::Filter(Box::new(filter_rel))),
+        })
+    }
+
+    fn translate_select(&self, input: substrait::proto::Rel, projections: &[Projection], schema: &[String]) -> Result<substrait::proto::Rel, TranslateError> {
+        // Convert each projection to a Substrait expression
+        let expressions: Result<Vec<_>, _> = projections.iter().map(|proj| {
+            match proj {
+                Projection::Expr(expr) => self.translate_expr(expr, schema),
+                Projection::Aliased { expr, alias: _ } => {
+                    // For now, just translate the expression
+                    // Aliases are handled at the relation level (output names)
+                    self.translate_expr(expr, schema)
+                }
+            }
+        }).collect();
+
+        let expressions = expressions?;
+
+        // Create ProjectRel
+        let project_rel = substrait::proto::ProjectRel {
+            common: None,
+            input: Some(Box::new(input)),
+            expressions,
+            advanced_extension: None,
+        };
+
+        // Wrap in Rel
+        Ok(substrait::proto::Rel {
+            rel_type: Some(substrait::proto::rel::RelType::Project(Box::new(project_rel))),
         })
     }
 
@@ -582,6 +612,87 @@ mod tests {
         // Debug: serialize to JSON
         let plan_json = serde_json::to_string_pretty(&plan).expect("Failed to serialize to JSON");
         println!("✅ Filter test passed - Generated Substrait Plan:");
+        println!("{}", plan_json);
+        println!("   Plan size: {} bytes", plan_bytes.len());
+    }
+
+    #[test]
+    fn test_select_specific_columns() {
+        use prost::Message;
+
+        // Setup schema provider
+        let mut schema_provider = MockSchemaProvider::new();
+        schema_provider.add_table(TableSchema {
+            name: "users".to_string(),
+            columns: vec![
+                ColumnInfo {
+                    name: "id".to_string(),
+                    data_type: "INTEGER".to_string(),
+                    nullable: false,
+                },
+                ColumnInfo {
+                    name: "name".to_string(),
+                    data_type: "VARCHAR".to_string(),
+                    nullable: true,
+                },
+                ColumnInfo {
+                    name: "age".to_string(),
+                    data_type: "INTEGER".to_string(),
+                    nullable: true,
+                },
+            ],
+        });
+
+        // Create IR Program: from users | select [name, age]
+        let program = Program {
+            pragma: None,
+            lets: vec![],
+            pipeline: Pipeline {
+                source: Source::Table {
+                    name: "users".to_string(),
+                    alias: None,
+                },
+                ops: vec![
+                    Operator::Select {
+                        projections: vec![
+                            Projection::Expr(Expr::Column {
+                                col: ColumnRef {
+                                    table: None,
+                                    column: "name".to_string(),
+                                },
+                            }),
+                            Projection::Expr(Expr::Column {
+                                col: ColumnRef {
+                                    table: None,
+                                    column: "age".to_string(),
+                                },
+                            }),
+                        ],
+                    },
+                ],
+            },
+        };
+
+        // Translate to Substrait
+        let translator = SubstraitTranslator::new(&schema_provider);
+        let result = translator.translate(&program);
+
+        // Verify it succeeds
+        assert!(result.is_ok(), "Translation failed: {:?}", result.err());
+
+        let plan = result.unwrap();
+
+        // Verify plan structure
+        assert!(plan.version.is_some(), "Plan should have version");
+        assert_eq!(plan.relations.len(), 1, "Plan should have exactly one relation");
+
+        // Serialize to protobuf
+        let plan_bytes = plan.encode_to_vec();
+        assert!(plan_bytes.len() > 0, "Plan should serialize to protobuf");
+
+        // Debug: serialize to JSON
+        let plan_json = serde_json::to_string_pretty(&plan).expect("Failed to serialize to JSON");
+        println!("✅ Select test passed - Generated Substrait Plan:");
         println!("{}", plan_json);
         println!("   Plan size: {} bytes", plan_bytes.len());
     }
