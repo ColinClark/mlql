@@ -1,6 +1,6 @@
 //! Core Substrait translator
 
-use crate::{Program, Pipeline, Source};
+use crate::{Program, Pipeline, Source, Operator, Expr, Value, BinOp, UnOp, ColumnRef};
 use super::schema::SchemaProvider;
 use substrait::proto::Plan;
 
@@ -71,15 +71,194 @@ impl<'a> SubstraitTranslator<'a> {
     }
 
     fn translate_pipeline(&self, pipeline: &Pipeline) -> Result<substrait::proto::Rel, TranslateError> {
-        // Start with the source
-        let rel = self.translate_source(&pipeline.source)?;
+        // Start with the source and get the initial schema
+        let mut rel = self.translate_source(&pipeline.source)?;
 
-        // TODO: Apply operators on top of the source relation
-        for _op in &pipeline.ops {
-            // Phase 2.2+: Implement Filter, Select, Sort, etc.
+        // Get the schema context from the source
+        let mut current_schema = self.get_output_names(&pipeline.source)?;
+
+        // Apply operators on top of the source relation
+        for op in &pipeline.ops {
+            rel = self.translate_operator(op, rel, &current_schema)?;
+            // TODO: Update current_schema if operator changes column set (e.g., Select)
         }
 
         Ok(rel)
+    }
+
+    fn translate_operator(&self, op: &Operator, input: substrait::proto::Rel, schema: &[String]) -> Result<substrait::proto::Rel, TranslateError> {
+        match op {
+            Operator::Filter { condition } => self.translate_filter(input, condition, schema),
+            _ => Err(TranslateError::UnsupportedOperator(format!("Operator {:?} not yet supported", op))),
+        }
+    }
+
+    fn translate_filter(&self, input: substrait::proto::Rel, condition: &Expr, schema: &[String]) -> Result<substrait::proto::Rel, TranslateError> {
+        // Convert the condition expression to a Substrait expression
+        let substrait_condition = self.translate_expr(condition, schema)?;
+
+        // Create FilterRel
+        let filter_rel = substrait::proto::FilterRel {
+            common: None,
+            input: Some(Box::new(input)),
+            condition: Some(Box::new(substrait_condition)),
+            advanced_extension: None,
+        };
+
+        // Wrap in Rel
+        Ok(substrait::proto::Rel {
+            rel_type: Some(substrait::proto::rel::RelType::Filter(Box::new(filter_rel))),
+        })
+    }
+
+    fn translate_expr(&self, expr: &Expr, schema: &[String]) -> Result<substrait::proto::Expression, TranslateError> {
+        match expr {
+            Expr::Literal { value } => self.translate_literal(value),
+            Expr::Column { col } => self.translate_column_ref(col, schema),
+            Expr::BinaryOp { op, left, right } => self.translate_binary_op(op, left, right, schema),
+            Expr::UnaryOp { op, expr } => self.translate_unary_op(op, expr, schema),
+            _ => Err(TranslateError::UnsupportedOperator(format!("Expression {:?} not yet supported", expr))),
+        }
+    }
+
+    fn translate_literal(&self, value: &Value) -> Result<substrait::proto::Expression, TranslateError> {
+        let literal = match value {
+            Value::Null => substrait::proto::expression::Literal {
+                nullable: true,
+                type_variation_reference: 0,
+                literal_type: Some(substrait::proto::expression::literal::LiteralType::Null(
+                    substrait::proto::Type { kind: None }
+                )),
+            },
+            Value::Bool(b) => substrait::proto::expression::Literal {
+                nullable: false,
+                type_variation_reference: 0,
+                literal_type: Some(substrait::proto::expression::literal::LiteralType::Boolean(*b)),
+            },
+            Value::Int(i) => substrait::proto::expression::Literal {
+                nullable: false,
+                type_variation_reference: 0,
+                literal_type: Some(substrait::proto::expression::literal::LiteralType::I64(*i)),
+            },
+            Value::Float(f) => substrait::proto::expression::Literal {
+                nullable: false,
+                type_variation_reference: 0,
+                literal_type: Some(substrait::proto::expression::literal::LiteralType::Fp64(*f)),
+            },
+            Value::String(s) => substrait::proto::expression::Literal {
+                nullable: false,
+                type_variation_reference: 0,
+                literal_type: Some(substrait::proto::expression::literal::LiteralType::String(s.clone())),
+            },
+            _ => return Err(TranslateError::UnsupportedOperator(format!("Literal value {:?} not yet supported", value))),
+        };
+
+        Ok(substrait::proto::Expression {
+            rex_type: Some(substrait::proto::expression::RexType::Literal(literal)),
+        })
+    }
+
+    fn translate_column_ref(&self, col: &ColumnRef, schema: &[String]) -> Result<substrait::proto::Expression, TranslateError> {
+        // Resolve column name to field index
+        let column_name = &col.column;
+
+        // Find the column index in the schema
+        let field_index = schema.iter()
+            .position(|name| name == column_name)
+            .ok_or_else(|| TranslateError::Translation(
+                format!("Column '{}' not found in schema. Available columns: {:?}", column_name, schema)
+            ))?;
+
+        // Create a FieldReference (direct field reference by index)
+        let field_ref = substrait::proto::expression::FieldReference {
+            reference_type: Some(substrait::proto::expression::field_reference::ReferenceType::DirectReference(
+                substrait::proto::expression::ReferenceSegment {
+                    reference_type: Some(substrait::proto::expression::reference_segment::ReferenceType::StructField(
+                        Box::new(substrait::proto::expression::reference_segment::StructField {
+                            field: field_index as i32,
+                            child: None,
+                        })
+                    )),
+                }
+            )),
+            root_type: None, // Type inference
+        };
+
+        Ok(substrait::proto::Expression {
+            rex_type: Some(substrait::proto::expression::RexType::Selection(Box::new(field_ref))),
+        })
+    }
+
+    fn translate_binary_op(&self, op: &BinOp, left: &Expr, right: &Expr, schema: &[String]) -> Result<substrait::proto::Expression, TranslateError> {
+        let left_expr = Box::new(self.translate_expr(left, schema)?);
+        let right_expr = Box::new(self.translate_expr(right, schema)?);
+
+        // Map MLQL binary operator to Substrait function name
+        let function_name = match op {
+            BinOp::Eq => "equal",
+            BinOp::Ne => "not_equal",
+            BinOp::Lt => "lt",
+            BinOp::Le => "lte",
+            BinOp::Gt => "gt",
+            BinOp::Ge => "gte",
+            BinOp::And => "and",
+            BinOp::Or => "or",
+            BinOp::Add => "add",
+            BinOp::Sub => "subtract",
+            BinOp::Mul => "multiply",
+            BinOp::Div => "divide",
+            BinOp::Like => "like",
+            BinOp::ILike => "ilike",
+            _ => return Err(TranslateError::UnsupportedOperator(format!("Binary operator {:?} not yet supported", op))),
+        };
+
+        // Create scalar function call
+        // Note: function_reference would need to be registered in an extension
+        // For now, using a placeholder approach
+        let scalar_function = substrait::proto::expression::ScalarFunction {
+            function_reference: 0, // Would need proper function registration
+            arguments: vec![
+                substrait::proto::FunctionArgument {
+                    arg_type: Some(substrait::proto::function_argument::ArgType::Value(*left_expr)),
+                },
+                substrait::proto::FunctionArgument {
+                    arg_type: Some(substrait::proto::function_argument::ArgType::Value(*right_expr)),
+                },
+            ],
+            output_type: None, // Type inference
+            options: vec![],
+            args: vec![], // Deprecated field
+        };
+
+        Ok(substrait::proto::Expression {
+            rex_type: Some(substrait::proto::expression::RexType::ScalarFunction(scalar_function)),
+        })
+    }
+
+    fn translate_unary_op(&self, op: &UnOp, expr: &Expr, schema: &[String]) -> Result<substrait::proto::Expression, TranslateError> {
+        let inner_expr = Box::new(self.translate_expr(expr, schema)?);
+
+        let function_name = match op {
+            UnOp::Not => "not",
+            UnOp::Neg => "negate",
+        };
+
+        // Create scalar function call
+        let scalar_function = substrait::proto::expression::ScalarFunction {
+            function_reference: 0,
+            arguments: vec![
+                substrait::proto::FunctionArgument {
+                    arg_type: Some(substrait::proto::function_argument::ArgType::Value(*inner_expr)),
+                },
+            ],
+            output_type: None,
+            options: vec![],
+            args: vec![],
+        };
+
+        Ok(substrait::proto::Expression {
+            rex_type: Some(substrait::proto::expression::RexType::ScalarFunction(scalar_function)),
+        })
     }
 
     fn translate_source(&self, source: &Source) -> Result<substrait::proto::Rel, TranslateError> {
@@ -326,5 +505,84 @@ mod tests {
 
         println!("✅ Substrait plan generation test passed");
         println!("   Generated {} bytes", plan_bytes.len());
+    }
+
+    #[test]
+    fn test_filter_with_comparison() {
+        use prost::Message;
+
+        // Setup schema provider with users table
+        let mut schema_provider = MockSchemaProvider::new();
+        schema_provider.add_table(TableSchema {
+            name: "users".to_string(),
+            columns: vec![
+                ColumnInfo {
+                    name: "id".to_string(),
+                    data_type: "INTEGER".to_string(),
+                    nullable: false,
+                },
+                ColumnInfo {
+                    name: "name".to_string(),
+                    data_type: "VARCHAR".to_string(),
+                    nullable: true,
+                },
+                ColumnInfo {
+                    name: "age".to_string(),
+                    data_type: "INTEGER".to_string(),
+                    nullable: true,
+                },
+            ],
+        });
+
+        // Create IR Program: from users | filter age > 18
+        let program = Program {
+            pragma: None,
+            lets: vec![],
+            pipeline: Pipeline {
+                source: Source::Table {
+                    name: "users".to_string(),
+                    alias: None,
+                },
+                ops: vec![
+                    Operator::Filter {
+                        condition: Expr::BinaryOp {
+                            op: BinOp::Gt,
+                            left: Box::new(Expr::Column {
+                                col: ColumnRef {
+                                    table: None,
+                                    column: "age".to_string(),
+                                },
+                            }),
+                            right: Box::new(Expr::Literal {
+                                value: Value::Int(18),
+                            }),
+                        },
+                    },
+                ],
+            },
+        };
+
+        // Translate to Substrait
+        let translator = SubstraitTranslator::new(&schema_provider);
+        let result = translator.translate(&program);
+
+        // Verify it succeeds
+        assert!(result.is_ok(), "Translation failed: {:?}", result.err());
+
+        let plan = result.unwrap();
+
+        // Verify plan structure
+        assert!(plan.version.is_some(), "Plan should have version");
+        assert_eq!(plan.relations.len(), 1, "Plan should have exactly one relation");
+
+        // Serialize to protobuf to ensure it's valid
+        let plan_bytes = plan.encode_to_vec();
+        assert!(plan_bytes.len() > 0, "Plan should serialize to protobuf");
+
+        // Debug: serialize to JSON
+        let plan_json = serde_json::to_string_pretty(&plan).expect("Failed to serialize to JSON");
+        println!("✅ Filter test passed - Generated Substrait Plan:");
+        println!("{}", plan_json);
+        println!("   Plan size: {} bytes", plan_bytes.len());
     }
 }
