@@ -28,6 +28,9 @@ serde_json = "1.0"
 duckdb = "1.4"
 arrow = "56"
 
+# Substrait
+substrait = { version = "0.61", features = ["serde"] }
+
 # Async runtime (for server)
 tokio = { version = "1", features = ["full"] }
 axum = { version = "0.7" }
