@@ -81,15 +81,21 @@ We just built the DuckDB substrait extension to **consume** Substrait plans, not
 - Column names resolve to field indices via `schema.iter().position()`
 - Field references use Substrait StructField with index
 
-### 2.3 Project Operator (Select)
-- [ ] Translate `Operator::Select` → `ProjectRel`
-- [ ] Handle wildcard `*` projection
-- [ ] Handle specific column projections
-- [ ] Handle aliased expressions
-- [ ] Generate proper field references
+### 2.3 Project Operator (Select) ✅
+- [x] Translate `Operator::Select` → `ProjectRel`
+- [x] Handle wildcard `*` projection (via column references)
+- [x] Handle specific column projections
+- [x] Handle aliased expressions
+- [x] Generate proper field references
 
-**Test**: `from users | select [name, age]` → ProjectRel
-**Commit**: "feat(ir): translate select/project operator"
+**Test**: ✅ `test_select_specific_columns` passes - `from users | select [name, age]` → ProjectRel
+**Commit**: ✅ "feat(ir): implement Select operator (ProjectRel)"
+
+**Implementation Details**:
+- ProjectRel wraps input relation with list of expressions
+- Each Projection → Substrait Expression
+- Column references resolve to FieldReference with correct indices
+- Aliases handled via Projection::Aliased variant
 
 ### 2.4 Sort Operator
 - [ ] Translate `Operator::Sort` → `SortRel`
