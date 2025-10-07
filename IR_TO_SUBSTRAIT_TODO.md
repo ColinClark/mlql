@@ -65,15 +65,21 @@ We just built the DuckDB substrait extension to **consume** Substrait plans, not
   - Workaround: Use static extension for testing (works perfectly)
   - Long-term: Bug is macOS-specific, will work on Linux/Windows
 
-### 2.2 Filter Operator
-- [ ] Translate `Operator::Filter` → `FilterRel`
-- [ ] Convert `Expr` → Substrait `Expression`
-- [ ] Handle comparison ops (==, !=, <, >, <=, >=)
-- [ ] Handle logical ops (AND, OR, NOT)
-- [ ] Handle column references
+### 2.2 Filter Operator ✅
+- [x] Translate `Operator::Filter` → `FilterRel`
+- [x] Convert `Expr` → Substrait `Expression`
+- [x] Handle comparison ops (==, !=, <, >, <=, >=)
+- [x] Handle logical ops (AND, OR, NOT)
+- [x] Handle column references with schema context
 
-**Test**: `from users | filter age > 18` → FilterRel
-**Commit**: "feat(ir): translate filter operator"
+**Test**: ✅ `test_filter_with_comparison` passes - `from users | filter age > 18` → FilterRel
+**Commit**: ✅ "feat(ir): implement Filter operator with column references"
+
+**Schema Context Implementation**:
+- Pipeline retrieves schema from source via `get_output_names()`
+- Schema (Vec<String>) passed to `translate_operator()` and `translate_expr()`
+- Column names resolve to field indices via `schema.iter().position()`
+- Field references use Substrait StructField with index
 
 ### 2.3 Project Operator (Select)
 - [ ] Translate `Operator::Select` → `ProjectRel`
