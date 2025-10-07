@@ -5,5 +5,5 @@
 mod schema;
 mod translator;
 
-pub use schema::{SchemaProvider, TableSchema, ColumnInfo};
+pub use schema::{SchemaProvider, TableSchema, ColumnInfo, MockSchemaProvider};
 pub use translator::{SubstraitTranslator, TranslateError};
