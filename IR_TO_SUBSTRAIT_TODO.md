@@ -44,14 +44,20 @@ We just built the DuckDB substrait extension to **consume** Substrait plans, not
 
 ## Phase 2: Core Operators (Milestone 2)
 
-### 2.1 Table Source (Read Relation)
-- [ ] Translate `Source::Table` → `ReadRel`
-- [ ] Set base schema from provider
-- [ ] Handle table aliases
-- [ ] Generate `NamedTable` reference
+### 2.1 Table Source (Read Relation) ✅
+- [x] Translate `Source::Table` → `ReadRel`
+- [x] Set base schema from provider
+- [x] Handle table aliases (scaffolded, not used yet)
+- [x] Generate `NamedTable` reference
+- [x] Map common types (INTEGER, BIGINT, VARCHAR, FLOAT, DOUBLE)
+- [x] Add unit test `test_simple_table_scan`
+- [x] Add comprehensive test `test_substrait_plan_generation`
 
-**Test**: `from users u` → valid ReadRel with schema
-**Commit**: "feat(ir): translate table source to ReadRel"
+**Test**: ✅ Both tests pass - plan generates correctly with proper schema
+**Commit**: Pending - "feat(ir): translate table source to ReadRel"
+
+**Note**: Boolean type support skipped (substrait crate type structure unclear)
+**Note**: DuckDB execution testing deferred - loadable extension has initialization issues, will address in substrait project
 
 ### 2.2 Filter Operator
 - [ ] Translate `Operator::Filter` → `FilterRel`

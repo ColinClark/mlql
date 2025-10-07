@@ -11,3 +11,7 @@ chrono.workspace = true
 uuid.workspace = true
 sha2.workspace = true
 substrait.workspace = true
+
+[dev-dependencies]
+prost = "0.14"
+
