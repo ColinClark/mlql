@@ -156,4 +156,13 @@ curl -X POST http://localhost:3000/v1/execute \
 
 ## License
 
-MIT OR Apache-2.0
+**Creative Commons Attribution-NonCommercial 4.0 International (CC BY-NC 4.0)**
+
+This work is licensed under a Creative Commons Attribution-NonCommercial 4.0 International License.
+
+- ✅ **Free for non-commercial use** - Research, education, personal projects
+- ❌ **Commercial use requires a license** - Contact for licensing inquiries
+- 📧 **Commercial licensing**: Contact repository owner
+
+For the full license text, see [LICENSE](LICENSE) or visit:
+https://creativecommons.org/licenses/by-nc/4.0/
