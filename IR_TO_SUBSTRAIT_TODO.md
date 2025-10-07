@@ -97,14 +97,22 @@ We just built the DuckDB substrait extension to **consume** Substrait plans, not
 - Column references resolve to FieldReference with correct indices
 - Aliases handled via Projection::Aliased variant
 
-### 2.4 Sort Operator
-- [ ] Translate `Operator::Sort` → `SortRel`
-- [ ] Handle ascending/descending
-- [ ] Handle multiple sort keys
-- [ ] Map to Substrait sort direction
+### 2.4 Sort Operator ✅
+- [x] Translate `Operator::Sort` → `SortRel`
+- [x] Handle ascending/descending
+- [x] Handle multiple sort keys
+- [x] Map to Substrait sort direction (ASC_NULLS_FIRST=1, DESC_NULLS_LAST=4)
+- [x] Add test `test_sort_with_multiple_keys`
 
-**Test**: `from users | sort -age, +name` → SortRel
-**Commit**: "feat(ir): translate sort operator"
+**Test**: ✅ `from users | sort -age, +name` → SortRel (10 tests passing)
+**Commit**: Pending - "feat(ir): implement Sort operator (SortRel)"
+
+**Implementation Details**:
+- SortRel wraps input relation with list of SortField
+- Each SortKey → Substrait SortField with expression and direction
+- Direction mapping: `desc=true` → 4 (DESC_NULLS_LAST), `desc=false` → 1 (ASC_NULLS_FIRST)
+- Column references resolve to field indices via schema context
+- Multiple sort keys supported (secondary sort handled correctly)
 
 ### 2.5 Take/Limit Operator
 - [ ] Translate `Operator::Take` → `FetchRel`

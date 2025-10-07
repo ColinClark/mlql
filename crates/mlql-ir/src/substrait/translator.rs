@@ -1,6 +1,6 @@
 //! Core Substrait translator
 
-use crate::{Program, Pipeline, Source, Operator, Expr, Value, BinOp, UnOp, ColumnRef, Projection};
+use crate::{Program, Pipeline, Source, Operator, Expr, Value, BinOp, UnOp, ColumnRef, Projection, SortKey};
 use super::schema::SchemaProvider;
 use substrait::proto::Plan;
 
@@ -90,6 +90,7 @@ impl<'a> SubstraitTranslator<'a> {
         match op {
             Operator::Filter { condition } => self.translate_filter(input, condition, schema),
             Operator::Select { projections } => self.translate_select(input, projections, schema),
+            Operator::Sort { keys } => self.translate_sort(input, keys, schema),
             _ => Err(TranslateError::UnsupportedOperator(format!("Operator {:?} not yet supported", op))),
         }
     }
@@ -138,6 +139,41 @@ impl<'a> SubstraitTranslator<'a> {
         // Wrap in Rel
         Ok(substrait::proto::Rel {
             rel_type: Some(substrait::proto::rel::RelType::Project(Box::new(project_rel))),
+        })
+    }
+
+    fn translate_sort(&self, input: substrait::proto::Rel, keys: &[SortKey], schema: &[String]) -> Result<substrait::proto::Rel, TranslateError> {
+        // Convert each sort key to a Substrait SortField
+        let sorts: Result<Vec<_>, _> = keys.iter().map(|key| {
+            let expr = self.translate_expr(&key.expr, schema)?;
+
+            // Map MLQL desc flag to Substrait SortDirection
+            // Protobuf enum values: ASC_NULLS_FIRST=1, ASC_NULLS_LAST=2, DESC_NULLS_FIRST=3, DESC_NULLS_LAST=4
+            let direction = if key.desc {
+                4  // SORT_DIRECTION_DESC_NULLS_LAST
+            } else {
+                1  // SORT_DIRECTION_ASC_NULLS_FIRST
+            };
+
+            Ok(substrait::proto::SortField {
+                expr: Some(expr),
+                sort_kind: Some(substrait::proto::sort_field::SortKind::Direction(direction)),
+            })
+        }).collect();
+
+        let sorts = sorts?;
+
+        // Create SortRel
+        let sort_rel = substrait::proto::SortRel {
+            common: None,
+            input: Some(Box::new(input)),
+            sorts,
+            advanced_extension: None,
+        };
+
+        // Wrap in Rel
+        Ok(substrait::proto::Rel {
+            rel_type: Some(substrait::proto::rel::RelType::Sort(Box::new(sort_rel))),
         })
     }
 
@@ -693,6 +729,94 @@ mod tests {
         // Debug: serialize to JSON
         let plan_json = serde_json::to_string_pretty(&plan).expect("Failed to serialize to JSON");
         println!("✅ Select test passed - Generated Substrait Plan:");
+        println!("{}", plan_json);
+        println!("   Plan size: {} bytes", plan_bytes.len());
+    }
+
+    #[test]
+    fn test_sort_with_multiple_keys() {
+        use prost::Message;
+
+        // Setup schema provider
+        let mut schema_provider = MockSchemaProvider::new();
+        schema_provider.add_table(TableSchema {
+            name: "users".to_string(),
+            columns: vec![
+                ColumnInfo {
+                    name: "id".to_string(),
+                    data_type: "INTEGER".to_string(),
+                    nullable: false,
+                },
+                ColumnInfo {
+                    name: "name".to_string(),
+                    data_type: "VARCHAR".to_string(),
+                    nullable: true,
+                },
+                ColumnInfo {
+                    name: "age".to_string(),
+                    data_type: "INTEGER".to_string(),
+                    nullable: true,
+                },
+            ],
+        });
+
+        // Create IR Program: from users | sort -age, +name
+        // This means: sort by age descending, then by name ascending
+        let program = Program {
+            pragma: None,
+            lets: vec![],
+            pipeline: Pipeline {
+                source: Source::Table {
+                    name: "users".to_string(),
+                    alias: None,
+                },
+                ops: vec![
+                    Operator::Sort {
+                        keys: vec![
+                            SortKey {
+                                expr: Expr::Column {
+                                    col: ColumnRef {
+                                        table: None,
+                                        column: "age".to_string(),
+                                    },
+                                },
+                                desc: true,  // -age means descending
+                            },
+                            SortKey {
+                                expr: Expr::Column {
+                                    col: ColumnRef {
+                                        table: None,
+                                        column: "name".to_string(),
+                                    },
+                                },
+                                desc: false,  // +name means ascending
+                            },
+                        ],
+                    },
+                ],
+            },
+        };
+
+        // Translate to Substrait
+        let translator = SubstraitTranslator::new(&schema_provider);
+        let result = translator.translate(&program);
+
+        // Verify it succeeds
+        assert!(result.is_ok(), "Translation failed: {:?}", result.err());
+
+        let plan = result.unwrap();
+
+        // Verify plan structure
+        assert!(plan.version.is_some(), "Plan should have version");
+        assert_eq!(plan.relations.len(), 1, "Plan should have exactly one relation");
+
+        // Serialize to protobuf
+        let plan_bytes = plan.encode_to_vec();
+        assert!(plan_bytes.len() > 0, "Plan should serialize to protobuf");
+
+        // Debug: serialize to JSON
+        let plan_json = serde_json::to_string_pretty(&plan).expect("Failed to serialize to JSON");
+        println!("✅ Sort test passed - Generated Substrait Plan:");
         println!("{}", plan_json);
         println!("   Plan size: {} bytes", plan_bytes.len());
     }
