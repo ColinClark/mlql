@@ -19,3 +19,7 @@ tracing-subscriber.workspace = true
 prometheus.workspace = true
 async-openai.workspace = true
 dotenvy.workspace = true
+rust-mcp-sdk.workspace = true
+rust-mcp-schema.workspace = true
+async-trait.workspace = true
+duckdb.workspace = true

@@ -52,6 +52,11 @@ sha2 = "0.10"
 async-openai = "0.28"
 dotenvy = "0.15"
 
+# MCP (Model Context Protocol)
+rust-mcp-sdk = "0.7"
+rust-mcp-schema = "0.7"
+async-trait = "0.1"
+
 [profile.release]
 lto = true
 codegen-units = 1

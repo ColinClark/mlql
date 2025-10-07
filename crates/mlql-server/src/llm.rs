@@ -35,7 +35,7 @@ Available Operators:
   "op": "Filter",
   "condition": {
     "type": "BinaryOp",
-    "op": "Gt",  // Gt, Lt, Eq, Ne, Gte, Lte, And, Or, Like
+    "op": "Gt",  // Gt, Lt, Eq, Ne, Ge, Le, And, Or, Like
     "left": {"type": "Column", "col": {"column": "age"}},
     "right": {"type": "Literal", "value": 25}
   }
@@ -46,7 +46,7 @@ Available Operators:
 ```json
 {
   "op": "Select",
-  "exprs": [
+  "projections": [
     {"type": "Column", "col": {"column": "name"}},
     {
       "type": "BinaryOp",
@@ -64,7 +64,7 @@ Available Operators:
 {
   "op": "Sort",
   "keys": [
-    {"col": {"column": "age"}, "asc": true}
+    {"expr": {"type": "Column", "col": {"column": "age"}}, "desc": false}
   ]
 }
 ```
@@ -73,7 +73,7 @@ Available Operators:
 ```json
 {
   "op": "Take",
-  "count": 10
+  "limit": 10
 }
 ```
 
@@ -123,7 +123,7 @@ Available Operators:
 
 Binary Operators:
 - Arithmetic: Add, Sub, Mul, Div, Mod
-- Comparison: Eq, Ne, Lt, Gt, Lte, Gte, Like
+- Comparison: Eq, Ne, Lt, Gt, Le, Ge, Like
 - Logical: And, Or
 
 Important Rules:
@@ -162,18 +162,18 @@ Response:
     "ops": [
       {
         "op": "Select",
-        "exprs": [
+        "projections": [
           {"type": "Column", "col": {"column": "name"}},
           {"type": "Column", "col": {"column": "age"}}
         ]
       },
       {
         "op": "Sort",
-        "keys": [{"col": {"column": "age"}, "asc": true}]
+        "keys": [{"expr": {"type": "Column", "col": {"column": "age"}}, "desc": false}]
       },
       {
         "op": "Take",
-        "count": 10
+        "limit": 10
       }
     ]
   }
@@ -196,19 +196,148 @@ Response:
   }
 }
 
+Query: "how many users are there"
+Response:
+{
+  "pipeline": {
+    "source": {"type": "Table", "name": "users"},
+    "ops": [
+      {
+        "op": "GroupBy",
+        "keys": [],
+        "aggs": {
+          "count": {"func": "count", "args": []}
+        }
+      }
+    ]
+  }
+}
+
+Query: "show me the top 5 products by price"
+Response:
+{
+  "pipeline": {
+    "source": {"type": "Table", "name": "products"},
+    "ops": [
+      {
+        "op": "Sort",
+        "keys": [{"expr": {"type": "Column", "col": {"column": "price"}}, "desc": true}]
+      },
+      {
+        "op": "Take",
+        "limit": 5
+      }
+    ]
+  }
+}
+
+Query: "get all orders from last month"
+Response:
+{
+  "pipeline": {
+    "source": {"type": "Table", "name": "orders"},
+    "ops": [
+      {
+        "op": "Filter",
+        "condition": {
+          "type": "BinaryOp",
+          "op": "Ge",
+          "left": {"type": "Column", "col": {"column": "order_date"}},
+          "right": {"type": "Literal", "value": "2024-01-01"}
+        }
+      }
+    ]
+  }
+}
+
+Query: "average price by category"
+Response:
+{
+  "pipeline": {
+    "source": {"type": "Table", "name": "products"},
+    "ops": [
+      {
+        "op": "GroupBy",
+        "keys": [{"column": "category"}],
+        "aggs": {
+          "avg_price": {
+            "func": "avg",
+            "args": [{"type": "Column", "col": {"column": "price"}}]
+          }
+        }
+      }
+    ]
+  }
+}
+
+Query: "users and their orders"
+Response:
+{
+  "pipeline": {
+    "source": {"type": "Table", "name": "users", "alias": "u"},
+    "ops": [
+      {
+        "op": "Join",
+        "source": {"type": "Table", "name": "orders", "alias": "o"},
+        "on": {
+          "type": "BinaryOp",
+          "op": "Eq",
+          "left": {"type": "Column", "col": {"table": "u", "column": "id"}},
+          "right": {"type": "Column", "col": {"table": "o", "column": "user_id"}}
+        },
+        "join_type": "Inner"
+      }
+    ]
+  }
+}
+
+Query: "distinct cities"
+Response:
+{
+  "pipeline": {
+    "source": {"type": "Table", "name": "users"},
+    "ops": [
+      {
+        "op": "Select",
+        "projections": [{"type": "Column", "col": {"column": "city"}}]
+      },
+      {
+        "op": "Distinct"
+      }
+    ]
+  }
+}
+
 Return ONLY the JSON, no other text."#;
 
 /// Convert natural language query to MLQL IR using OpenAI with error retry loop
+#[allow(dead_code)]
 pub async fn natural_language_to_ir(
     client: &Client<OpenAIConfig>,
     query: &str,
 ) -> Result<Pipeline, Box<dyn std::error::Error>> {
+    natural_language_to_ir_with_catalog(client, query, None).await
+}
+
+/// Convert natural language query to MLQL IR using OpenAI with optional catalog context
+pub async fn natural_language_to_ir_with_catalog(
+    client: &Client<OpenAIConfig>,
+    query: &str,
+    catalog_json: Option<&str>,
+) -> Result<Pipeline, Box<dyn std::error::Error>> {
     const MAX_RETRIES: usize = 3;
+
+    // Build system prompt with optional catalog
+    let system_prompt = if let Some(catalog) = catalog_json {
+        format!("{}\n\n## Database Catalog\n\nThe following tables are available in the database. Use this information to construct accurate queries:\n\n{}", SYSTEM_PROMPT, catalog)
+    } else {
+        SYSTEM_PROMPT.to_string()
+    };
 
     let mut messages = vec![
         ChatCompletionRequestMessage::System(
             ChatCompletionRequestSystemMessageArgs::default()
-                .content(SYSTEM_PROMPT)
+                .content(system_prompt)
                 .build()?,
         ),
         ChatCompletionRequestMessage::User(
@@ -236,18 +365,46 @@ pub async fn natural_language_to_ir(
             .and_then(|choice| choice.message.content.as_ref())
             .ok_or("No response from OpenAI")?;
 
-        // Try to parse JSON response to Pipeline
-        match serde_json::from_str::<Pipeline>(content) {
-            Ok(pipeline) => {
+        tracing::info!("LLM Response (attempt {}): {}", attempt + 1, content);
+
+        // Try to parse JSON response - first try as wrapper with "pipeline" key
+        let pipeline_result = serde_json::from_str::<serde_json::Value>(content)
+            .ok()
+            .and_then(|v| {
+                // Try to extract pipeline from wrapper
+                if let Some(pipeline_value) = v.get("pipeline") {
+                    match serde_json::from_value::<Pipeline>(pipeline_value.clone()) {
+                        Ok(p) => Some(p),
+                        Err(e) => {
+                            tracing::warn!("Failed to parse pipeline from wrapper: {}", e);
+                            tracing::warn!("Attempted to parse: {}", pipeline_value);
+                            None
+                        }
+                    }
+                } else {
+                    // Try parsing whole thing as Pipeline directly
+                    match serde_json::from_value::<Pipeline>(v.clone()) {
+                        Ok(p) => Some(p),
+                        Err(e) => {
+                            tracing::warn!("Failed to parse as direct Pipeline: {}", e);
+                            tracing::warn!("Attempted to parse: {}", v);
+                            None
+                        }
+                    }
+                }
+            });
+
+        match pipeline_result {
+            Some(pipeline) => {
                 // Success! Return the pipeline
                 return Ok(pipeline);
             }
-            Err(parse_error) => {
+            None => {
                 if attempt == MAX_RETRIES - 1 {
                     // Last attempt failed, return error
                     return Err(format!(
-                        "Failed to parse MLQL IR after {} attempts. Last error: {}. Response: {}",
-                        MAX_RETRIES, parse_error, content
+                        "Failed to parse MLQL IR after {} attempts. Response: {}",
+                        MAX_RETRIES, content
                     )
                     .into());
                 }
@@ -258,17 +415,18 @@ pub async fn natural_language_to_ir(
                         .content(content.clone())
                         .build()?,
                 ));
+                let error_msg = format!(
+                    "Error: Failed to parse your response as valid MLQL IR JSON. \
+                     Please fix the JSON and try again. Remember: return ONLY valid JSON, no markdown formatting. \
+                     Your response was: {}", content
+                );
+                tracing::warn!("Parse attempt {} failed, sending feedback to LLM", attempt + 1);
+
                 messages.push(ChatCompletionRequestMessage::User(
                     ChatCompletionRequestUserMessageArgs::default()
-                        .content(format!(
-                            "Error: Failed to parse your response as valid MLQL IR JSON. Parse error: {}. \
-                             Please fix the JSON and try again. Remember: return ONLY valid JSON, no markdown formatting.",
-                            parse_error
-                        ))
+                        .content(error_msg)
                         .build()?,
                 ));
-
-                tracing::warn!("Parse attempt {} failed: {}", attempt + 1, parse_error);
                 // Continue to next retry
             }
         }

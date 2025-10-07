@@ -7,11 +7,15 @@ use serde_json::json;
 /// Execute MLQL IR against DuckDB and return SQL + results
 pub async fn execute_ir(
     pipeline: Pipeline,
-    _database: Option<String>,
+    database: Option<String>,
 ) -> Result<(String, serde_json::Value), Box<dyn std::error::Error>> {
     // For now, create a new executor per-request since DuckDB Connection is not Send+Sync
     // TODO: Use connection pooling or serialize access
-    let executor = DuckExecutor::new()?;
+    let executor = if let Some(db_path) = database {
+        DuckExecutor::open(db_path)?
+    } else {
+        DuckExecutor::new()?
+    };
 
     // Convert Pipeline to Program for execution
     let program = Program {
@@ -20,11 +24,11 @@ pub async fn execute_ir(
         pipeline: pipeline.clone(),
     };
 
-    // Execute program
+    // Execute program and capture SQL
     let result = executor.execute_ir(&program, None)?;
 
-    // Extract SQL for debugging (construct from pipeline)
-    let sql = format!("Generated SQL for: {:?}", pipeline.source);
+    // Get the actual SQL that was executed
+    let sql = result.sql.clone().unwrap_or_else(|| "No SQL generated".to_string());
 
     // Convert result to JSON
     let json_result = result_to_json(&result)?;

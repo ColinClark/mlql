@@ -34,6 +34,11 @@ impl DuckExecutor {
         Ok(Self { conn })
     }
 
+    pub fn open<P: AsRef<std::path::Path>>(path: P) -> DuckResult<Self> {
+        let conn = Connection::open(path)?;
+        Ok(Self { conn })
+    }
+
     pub fn from_connection(conn: Connection) -> Self {
         Self { conn }
     }
@@ -52,10 +57,12 @@ impl DuckExecutor {
         // Convert IR to SQL
         let sql = ir_to_sql(program)?;
 
-        eprintln!("Generated SQL: {}", sql);
+        tracing::info!("Generated SQL: {}", sql);
 
         // Execute SQL query
-        self.execute_sql(&sql, budget)
+        let mut result = self.execute_sql(&sql, budget)?;
+        result.sql = Some(sql);
+        Ok(result)
     }
 
     /// Execute SQL query directly
@@ -127,6 +134,7 @@ impl DuckExecutor {
             columns: column_names,
             rows: result_rows,
             row_count,
+            sql: None,
         })
     }
 
@@ -154,6 +162,7 @@ pub struct QueryResult {
     pub columns: Vec<String>,
     pub rows: Vec<Vec<serde_json::Value>>,
     pub row_count: usize,
+    pub sql: Option<String>,
 }
 
 impl Default for DuckExecutor {
@@ -170,9 +179,9 @@ fn ir_to_sql(program: &mlql_ir::Program) -> Result<String, ExecutionError> {
     let table_name = match &pipeline.source {
         mlql_ir::Source::Table { name, alias } => {
             if let Some(a) = alias {
-                format!("{} AS {}", name, a)
+                format!("\"{}\" AS \"{}\"", name, a)
             } else {
-                name.clone()
+                format!("\"{}\"", name)
             }
         }
         _ => return Err(ExecutionError::SqlError("Unsupported source type".to_string())),
@@ -338,10 +347,11 @@ fn expr_to_sql(expr: &mlql_ir::Expr) -> String {
 }
 
 fn column_ref_to_sql(col: &mlql_ir::ColumnRef) -> String {
+    // Quote identifiers to handle special characters
     if let Some(ref table) = col.table {
-        format!("{}.{}", table, col.column)
+        format!("\"{}\".\"{}\"", table, col.column)
     } else {
-        col.column.clone()
+        format!("\"{}\"", col.column)
     }
 }
 

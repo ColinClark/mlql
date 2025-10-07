@@ -1,0 +1,20 @@
+{
+  "name": "mlql-mcp-server",
+  "version": "0.1.0",
+  "description": "MLQL MCP Server - Natural language to SQL queries",
+  "bin": {
+    "mlql-mcp-server": "./bin/mlql-server.js"
+  },
+  "scripts": {
+    "postinstall": "cd .. && cargo build --release -p mlql-server"
+  },
+  "keywords": [
+    "mcp",
+    "sql",
+    "nlp",
+    "mlql",
+    "model-context-protocol"
+  ],
+  "author": "",
+  "license": "MIT"
+}
