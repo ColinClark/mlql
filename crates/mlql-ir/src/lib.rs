@@ -10,6 +10,8 @@ use std::collections::HashMap;
 mod types;
 pub use types::*;
 
+pub mod substrait;
+
 /// Top-level MLQL program
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct Program {
