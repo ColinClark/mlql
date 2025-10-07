@@ -31,12 +31,15 @@ impl<'a> SubstraitTranslator<'a> {
         // Translate the main pipeline to a relation
         let root_rel = self.translate_pipeline(&program.pipeline)?;
 
+        // Extract column names from the source for the root
+        let names = self.get_output_names(&program.pipeline.source)?;
+
         // Wrap in PlanRel
         let plan_rel = substrait::proto::PlanRel {
             rel_type: Some(substrait::proto::plan_rel::RelType::Root(
                 substrait::proto::RelRoot {
                     input: Some(root_rel),
-                    names: vec![], // Field names - empty for now
+                    names, // Output column names
                 },
             )),
         };
@@ -52,6 +55,19 @@ impl<'a> SubstraitTranslator<'a> {
         };
 
         Ok(plan)
+    }
+
+    /// Get the output column names for a source
+    fn get_output_names(&self, source: &Source) -> Result<Vec<String>, TranslateError> {
+        match source {
+            Source::Table { name, alias: _ } => {
+                let schema = self.schema_provider
+                    .get_table_schema(name)
+                    .map_err(TranslateError::Schema)?;
+                Ok(schema.columns.iter().map(|c| c.name.clone()).collect())
+            }
+            _ => Err(TranslateError::UnsupportedOperator("Only Table sources supported currently".to_string())),
+        }
     }
 
     fn translate_pipeline(&self, pipeline: &Pipeline) -> Result<substrait::proto::Rel, TranslateError> {
@@ -302,6 +318,11 @@ mod tests {
         // Test serialization
         let plan_bytes = plan.encode_to_vec();
         assert!(plan_bytes.len() > 0, "Plan should serialize to protobuf");
+
+        // Debug: serialize to JSON to inspect structure
+        let plan_json = serde_json::to_string_pretty(&plan).expect("Failed to serialize to JSON");
+        println!("Generated Substrait Plan JSON:");
+        println!("{}", plan_json);
 
         println!("✅ Substrait plan generation test passed");
         println!("   Generated {} bytes", plan_bytes.len());

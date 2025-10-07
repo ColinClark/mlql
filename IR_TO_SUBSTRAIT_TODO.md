@@ -52,12 +52,18 @@ We just built the DuckDB substrait extension to **consume** Substrait plans, not
 - [x] Map common types (INTEGER, BIGINT, VARCHAR, FLOAT, DOUBLE)
 - [x] Add unit test `test_simple_table_scan`
 - [x] Add comprehensive test `test_substrait_plan_generation`
+- [x] Fix missing `names` field in RelRoot (required for execution)
+- [x] Add JSON serialization for debugging plan structure
 
-**Test**: ✅ Both tests pass - plan generates correctly with proper schema
-**Commit**: Pending - "feat(ir): translate table source to ReadRel"
+**Test**: ✅ Both tests pass - plan generates correctly with proper schema and root names
+**JSON Output**: Valid Substrait plan with version 0.53, ReadRel, and proper output column names
+**Commit**: Pending - "feat(ir): translate table source to ReadRel with proper root names"
 
 **Note**: Boolean type support skipped (substrait crate type structure unclear)
-**Note**: DuckDB execution testing deferred - loadable extension has initialization issues, will address in substrait project
+**BLOCKER**: DuckDB loadable extension hangs on macOS due to protobuf bug (https://github.com/protocolbuffers/protobuf/issues/4203)
+  - Root cause: Recursive locking in GoogleOnceInitImpl during ParseFromString when called from dylib
+  - Workaround: Use static extension for testing (works perfectly)
+  - Long-term: Bug is macOS-specific, will work on Linux/Windows
 
 ### 2.2 Filter Operator
 - [ ] Translate `Operator::Filter` → `FilterRel`
