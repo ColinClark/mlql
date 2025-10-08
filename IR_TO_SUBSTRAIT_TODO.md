@@ -168,12 +168,19 @@ We just built the DuckDB substrait extension to **consume** Substrait plans, not
 **Test**: `from sales | group by product { total: sum(amount) }` → AggregateRel
 **Commit**: "feat(ir): translate groupby/aggregate operator"
 
-### 3.3 Distinct Operator
-- [ ] Translate `Operator::Distinct` → `AggregateRel` with no aggs
-- [ ] Or use `DedupRel` if available
+### 3.3 Distinct Operator ✅
+- [x] Translate `Operator::Distinct` → `AggregateRel` with no measures
+- [x] Use deprecated `grouping_expressions` field for DuckDB compatibility
+- [x] Group by all columns with rootReference field
 
-**Test**: `from users | distinct` → AggregateRel/DedupRel
-**Commit**: "feat(ir): translate distinct operator"
+**Test**: ✅ `from users | distinct` → AggregateRel (test_distinct passes)
+**Commit**: ✅ 29de2a1 "feat(ir): implement Distinct operator (AggregateRel)"
+
+**Implementation Details**:
+- Uses AggregateRel with grouping on all columns, no measures (standard Substrait pattern)
+- DuckDB v1.4.0 requires deprecated `grouping_expressions` field inside Grouping message
+- Field references include `rootReference` to match DuckDB's format
+- Test verifies deduplication of exact duplicate rows (5 input rows → 3 distinct rows)
 
 ## Phase 4: Integration & Testing (Milestone 4)
 
