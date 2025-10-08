@@ -421,3 +421,145 @@ fn test_join() {
 
     println!("✅ Join: 3 rows with correct values");
 }
+
+#[test]
+fn test_all_aggregates() {
+    use mlql_ir::{AggCall, Expr, ColumnRef};
+    use std::collections::HashMap;
+
+    let conn = Connection::open_in_memory().unwrap();
+    conn.execute_batch("
+        CREATE TABLE sales (id INTEGER, product VARCHAR, amount INTEGER);
+        INSERT INTO sales VALUES
+            (1, 'Apple', 100),
+            (2, 'Apple', 200),
+            (3, 'Apple', 150),
+            (4, 'Banana', 50),
+            (5, 'Banana', 100);
+    ").unwrap();
+
+    let mut schema_provider = MockSchemaProvider::new();
+    schema_provider.add_table(TableSchema {
+        name: "sales".to_string(),
+        columns: vec![
+            ColumnInfo { name: "id".to_string(), data_type: "INTEGER".to_string(), nullable: true },
+            ColumnInfo { name: "product".to_string(), data_type: "VARCHAR".to_string(), nullable: true },
+            ColumnInfo { name: "amount".to_string(), data_type: "INTEGER".to_string(), nullable: true },
+        ],
+    });
+
+    // Test: from sales | group by product { total: sum(amount), count: count(amount), avg: avg(amount), min: min(amount), max: max(amount) }
+    let mut aggs = HashMap::new();
+    aggs.insert("total".to_string(), AggCall {
+        func: "sum".to_string(),
+        args: vec![Expr::Column {
+            col: ColumnRef {
+                table: None,
+                column: "amount".to_string(),
+            },
+        }],
+    });
+    aggs.insert("count".to_string(), AggCall {
+        func: "count".to_string(),
+        args: vec![Expr::Column {
+            col: ColumnRef {
+                table: None,
+                column: "amount".to_string(),
+            },
+        }],
+    });
+    aggs.insert("avg".to_string(), AggCall {
+        func: "avg".to_string(),
+        args: vec![Expr::Column {
+            col: ColumnRef {
+                table: None,
+                column: "amount".to_string(),
+            },
+        }],
+    });
+    aggs.insert("min".to_string(), AggCall {
+        func: "min".to_string(),
+        args: vec![Expr::Column {
+            col: ColumnRef {
+                table: None,
+                column: "amount".to_string(),
+            },
+        }],
+    });
+    aggs.insert("max".to_string(), AggCall {
+        func: "max".to_string(),
+        args: vec![Expr::Column {
+            col: ColumnRef {
+                table: None,
+                column: "amount".to_string(),
+            },
+        }],
+    });
+
+    let program = Program {
+        pragma: None,
+        lets: vec![],
+        pipeline: Pipeline {
+            source: Source::Table {
+                name: "sales".to_string(),
+                alias: None,
+            },
+            ops: vec![Operator::GroupBy {
+                keys: vec![ColumnRef {
+                    table: None,
+                    column: "product".to_string(),
+                }],
+                aggs,
+            }],
+        },
+    };
+
+    let translator = SubstraitTranslator::new(&schema_provider);
+    let plan = translator.translate(&program).expect("Translation should succeed");
+
+    let mut plan_bytes = Vec::new();
+    plan.encode(&mut plan_bytes).expect("Serialization should succeed");
+    println!("All aggregates plan: {} bytes", plan_bytes.len());
+
+    // Execute and get results
+    // NOTE: HashMap iteration order is non-deterministic, so we need to check column names to know the order
+    // Use dynamic SQL to select columns in known order
+    let mut stmt = conn.prepare(&format!(
+        "SELECT product, \"total\", \"count\", avg, min, max FROM from_substrait(?)"
+    )).unwrap();
+    let results: Vec<(String, i64, i64, f64, i32, i32)> = stmt
+        .query_map([plan_bytes], |row| Ok((
+            row.get(0)?,  // product
+            row.get(1)?,  // total (sum)
+            row.get(2)?,  // count
+            row.get(3)?,  // avg
+            row.get(4)?,  // min
+            row.get(5)?,  // max
+        )))
+        .unwrap()
+        .collect::<Result<Vec<_>, _>>()
+        .unwrap();
+
+    println!("All aggregates results: {:?}", results);
+
+    // Check that we have 2 groups
+    assert_eq!(results.len(), 2, "Expected 2 groups");
+
+    // Check Apple: total=450, count=3, avg=150, min=100, max=200
+    let apple = results.iter().find(|(product, _, _, _, _, _)| product == "Apple").expect("Apple not found");
+    assert_eq!(apple.1, 450, "Apple total should be 450");
+    assert_eq!(apple.2, 3, "Apple count should be 3");
+    assert!((apple.3 - 150.0).abs() < 0.1, "Apple avg should be ~150");
+    assert_eq!(apple.4, 100, "Apple min should be 100");
+    assert_eq!(apple.5, 200, "Apple max should be 200");
+
+    // Check Banana: total=150, count=2, avg=75, min=50, max=100
+    let banana = results.iter().find(|(product, _, _, _, _, _)| product == "Banana").expect("Banana not found");
+    assert_eq!(banana.1, 150, "Banana total should be 150");
+    assert_eq!(banana.2, 2, "Banana count should be 2");
+    assert!((banana.3 - 75.0).abs() < 0.1, "Banana avg should be ~75");
+    assert_eq!(banana.4, 50, "Banana min should be 50");
+    assert_eq!(banana.5, 100, "Banana max should be 100");
+
+    println!("✅ All aggregates: sum, count, avg, min, max all working correctly");
+}

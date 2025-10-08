@@ -747,19 +747,70 @@ impl<'a> SubstraitTranslator<'a> {
 
         let arguments = arguments?;
 
-        // Register the aggregate function and get its anchor
-        let function_sig = format!("{}:i32", agg_call.func);
-        let function_anchor = self.function_registry.borrow_mut().register(&function_sig);
-
-        // Create output type for aggregate function (i64 for sum)
-        let output_type = Some(substrait::proto::Type {
-            kind: Some(substrait::proto::r#type::Kind::I64(
-                substrait::proto::r#type::I64 {
-                    type_variation_reference: 0,
-                    nullability: substrait::proto::r#type::Nullability::Nullable as i32,
-                }
+        // Determine function signature and output type based on aggregate function
+        let (function_sig, output_type) = match agg_call.func.as_str() {
+            "sum" => (
+                "sum:i32".to_string(),
+                Some(substrait::proto::Type {
+                    kind: Some(substrait::proto::r#type::Kind::I64(
+                        substrait::proto::r#type::I64 {
+                            type_variation_reference: 0,
+                            nullability: substrait::proto::r#type::Nullability::Nullable as i32,
+                        }
+                    )),
+                })
+            ),
+            "count" => (
+                "count:i32".to_string(),
+                Some(substrait::proto::Type {
+                    kind: Some(substrait::proto::r#type::Kind::I64(
+                        substrait::proto::r#type::I64 {
+                            type_variation_reference: 0,
+                            nullability: substrait::proto::r#type::Nullability::Required as i32,
+                        }
+                    )),
+                })
+            ),
+            "avg" => (
+                "avg:i32".to_string(),
+                Some(substrait::proto::Type {
+                    kind: Some(substrait::proto::r#type::Kind::Fp64(
+                        substrait::proto::r#type::Fp64 {
+                            type_variation_reference: 0,
+                            nullability: substrait::proto::r#type::Nullability::Nullable as i32,
+                        }
+                    )),
+                })
+            ),
+            "min" => (
+                "min:i32".to_string(),
+                Some(substrait::proto::Type {
+                    kind: Some(substrait::proto::r#type::Kind::I32(
+                        substrait::proto::r#type::I32 {
+                            type_variation_reference: 0,
+                            nullability: substrait::proto::r#type::Nullability::Nullable as i32,
+                        }
+                    )),
+                })
+            ),
+            "max" => (
+                "max:i32".to_string(),
+                Some(substrait::proto::Type {
+                    kind: Some(substrait::proto::r#type::Kind::I32(
+                        substrait::proto::r#type::I32 {
+                            type_variation_reference: 0,
+                            nullability: substrait::proto::r#type::Nullability::Nullable as i32,
+                        }
+                    )),
+                })
+            ),
+            _ => return Err(TranslateError::UnsupportedOperator(
+                format!("Aggregate function '{}' not yet supported. Supported: sum, count, avg, min, max", agg_call.func)
             )),
-        });
+        };
+
+        // Register the aggregate function and get its anchor
+        let function_anchor = self.function_registry.borrow_mut().register(&function_sig);
 
         // Create AggregateFunction
         let agg_function = substrait::proto::AggregateFunction {
