@@ -3,6 +3,8 @@
 use crate::{Program, Pipeline, Source, Operator, Expr, Value, BinOp, UnOp, ColumnRef, Projection, SortKey};
 use super::schema::SchemaProvider;
 use substrait::proto::Plan;
+use std::cell::RefCell;
+use std::collections::HashMap;
 
 #[derive(Debug, thiserror::Error)]
 pub enum TranslateError {
@@ -16,14 +18,56 @@ pub enum TranslateError {
     Translation(String),
 }
 
+/// Function registry for tracking which Substrait functions are used
+#[derive(Debug)]
+struct FunctionRegistry {
+    /// Map function name to anchor ID
+    functions: HashMap<String, u32>,
+    /// Next available anchor
+    next_anchor: u32,
+}
+
+impl FunctionRegistry {
+    fn new() -> Self {
+        Self {
+            functions: HashMap::new(),
+            next_anchor: 1, // Start at 1 (0 is reserved)
+        }
+    }
+
+    /// Register a function and get its anchor ID
+    fn register(&mut self, function_name: &str) -> u32 {
+        if let Some(&anchor) = self.functions.get(function_name) {
+            return anchor;
+        }
+
+        let anchor = self.next_anchor;
+        self.functions.insert(function_name.to_string(), anchor);
+        self.next_anchor += 1;
+        anchor
+    }
+
+    /// Get all registered functions
+    fn get_functions(&self) -> Vec<(String, u32)> {
+        let mut funcs: Vec<_> = self.functions.iter().map(|(k, v)| (k.clone(), *v)).collect();
+        funcs.sort_by_key(|(_, anchor)| *anchor);
+        funcs
+    }
+}
+
 /// Translator for MLQL IR → Substrait
 pub struct SubstraitTranslator<'a> {
     schema_provider: &'a dyn SchemaProvider,
+    /// Function registry (using RefCell for interior mutability)
+    function_registry: RefCell<FunctionRegistry>,
 }
 
 impl<'a> SubstraitTranslator<'a> {
     pub fn new(schema_provider: &'a dyn SchemaProvider) -> Self {
-        Self { schema_provider }
+        Self {
+            schema_provider,
+            function_registry: RefCell::new(FunctionRegistry::new()),
+        }
     }
 
     /// Translate a Program to a Substrait Plan
@@ -44,17 +88,54 @@ impl<'a> SubstraitTranslator<'a> {
             )),
         };
 
+        // Generate extension URIs and function extensions
+        let (extension_uris, extensions) = self.generate_extensions();
+
         let plan = Plan {
             version: Some(substrait::proto::Version {
                 minor_number: 53,
                 patch_number: 0,
                 ..Default::default()
             }),
+            extension_uris,
+            extensions,
             relations: vec![plan_rel],
             ..Default::default()
         };
 
         Ok(plan)
+    }
+
+    /// Generate extension URIs and extensions based on registered functions
+    fn generate_extensions(&self) -> (Vec<substrait::proto::extensions::SimpleExtensionUri>, Vec<substrait::proto::extensions::SimpleExtensionDeclaration>) {
+        let registry = self.function_registry.borrow();
+        let functions = registry.get_functions();
+
+        if functions.is_empty() {
+            return (vec![], vec![]);
+        }
+
+        // Create single extension URI for Substrait standard functions
+        let extension_uri = substrait::proto::extensions::SimpleExtensionUri {
+            extension_uri_anchor: 1,
+            uri: "https://github.com/substrait-io/substrait/blob/main/extensions/functions_comparison.yaml".to_string(),
+        };
+
+        // Create extension function declarations
+        let extensions = functions.iter().map(|(function_name, anchor)| {
+            substrait::proto::extensions::SimpleExtensionDeclaration {
+                mapping_type: Some(substrait::proto::extensions::simple_extension_declaration::MappingType::ExtensionFunction(
+                    substrait::proto::extensions::simple_extension_declaration::ExtensionFunction {
+                        extension_uri_reference: 1, // Reference to the URI
+                        extension_urn_reference: 0, // Deprecated field (0 = not used)
+                        function_anchor: *anchor,
+                        name: function_name.clone(),
+                    }
+                )),
+            }
+        }).collect();
+
+        (vec![extension_uri], extensions)
     }
 
     /// Get the output column names for a source
@@ -279,8 +360,8 @@ impl<'a> SubstraitTranslator<'a> {
         let left_expr = Box::new(self.translate_expr(left, schema)?);
         let right_expr = Box::new(self.translate_expr(right, schema)?);
 
-        // Map MLQL binary operator to Substrait function name
-        let function_name = match op {
+        // Map MLQL binary operator to Substrait function base name
+        let function_base_name = match op {
             BinOp::Eq => "equal",
             BinOp::Ne => "not_equal",
             BinOp::Lt => "lt",
@@ -298,11 +379,16 @@ impl<'a> SubstraitTranslator<'a> {
             _ => return Err(TranslateError::UnsupportedOperator(format!("Binary operator {:?} not yet supported", op))),
         };
 
+        // For now, assume i32 types for comparisons (TODO: infer actual types)
+        // DuckDB function signature format: "function_name:arg1_type_arg2_type"
+        let function_signature = format!("{}:i32_i32", function_base_name);
+
+        // Register the function and get its anchor
+        let function_anchor = self.function_registry.borrow_mut().register(&function_signature);
+
         // Create scalar function call
-        // Note: function_reference would need to be registered in an extension
-        // For now, using a placeholder approach
         let scalar_function = substrait::proto::expression::ScalarFunction {
-            function_reference: 0, // Would need proper function registration
+            function_reference: function_anchor,
             arguments: vec![
                 substrait::proto::FunctionArgument {
                     arg_type: Some(substrait::proto::function_argument::ArgType::Value(*left_expr)),
@@ -324,14 +410,23 @@ impl<'a> SubstraitTranslator<'a> {
     fn translate_unary_op(&self, op: &UnOp, expr: &Expr, schema: &[String]) -> Result<substrait::proto::Expression, TranslateError> {
         let inner_expr = Box::new(self.translate_expr(expr, schema)?);
 
-        let function_name = match op {
+        let function_base_name = match op {
             UnOp::Not => "not",
             UnOp::Neg => "negate",
         };
 
+        // For now, assume bool type for not, i32 for negate
+        let function_signature = match op {
+            UnOp::Not => format!("{}:bool", function_base_name),
+            UnOp::Neg => format!("{}:i32", function_base_name),
+        };
+
+        // Register the function and get its anchor
+        let function_anchor = self.function_registry.borrow_mut().register(&function_signature);
+
         // Create scalar function call
         let scalar_function = substrait::proto::expression::ScalarFunction {
-            function_reference: 0,
+            function_reference: function_anchor,
             arguments: vec![
                 substrait::proto::FunctionArgument {
                     arg_type: Some(substrait::proto::function_argument::ArgType::Value(*inner_expr)),
