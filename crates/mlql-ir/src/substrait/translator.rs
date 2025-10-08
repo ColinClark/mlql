@@ -156,7 +156,7 @@ impl<'a> SubstraitTranslator<'a> {
         let mut rel = self.translate_source(&pipeline.source)?;
 
         // Get the schema context from the source
-        let mut current_schema = self.get_output_names(&pipeline.source)?;
+        let current_schema = self.get_output_names(&pipeline.source)?;
 
         // Apply operators on top of the source relation
         for op in &pipeline.ops {
@@ -173,6 +173,7 @@ impl<'a> SubstraitTranslator<'a> {
             Operator::Select { projections } => self.translate_select(input, projections, schema),
             Operator::Sort { keys } => self.translate_sort(input, keys, schema),
             Operator::Take { limit } => self.translate_take(input, *limit),
+            Operator::Distinct => self.translate_distinct(input, schema),
             _ => Err(TranslateError::UnsupportedOperator(format!("Operator {:?} not yet supported", op))),
         }
     }
@@ -275,6 +276,64 @@ impl<'a> SubstraitTranslator<'a> {
         // Wrap in Rel
         Ok(substrait::proto::Rel {
             rel_type: Some(substrait::proto::rel::RelType::Fetch(Box::new(fetch_rel))),
+        })
+    }
+
+    fn translate_distinct(&self, input: substrait::proto::Rel, schema: &[String]) -> Result<substrait::proto::Rel, TranslateError> {
+        // DISTINCT is implemented as an AggregateRel with grouping on all columns and no measures
+        // This is the standard Substrait pattern for deduplication
+        //
+        // NOTE: DuckDB v1.4.0 substrait extension uses the DEPRECATED `grouping_expressions` field
+        // inside Grouping (see duckdb-substrait-upgrade/src/from_substrait.cpp:664), not the new
+        // `expression_references` approach. We must use the deprecated API for compatibility.
+
+        // Create grouping expressions for all columns
+        let grouping_expressions: Result<Vec<_>, _> = schema.iter().enumerate().map(|(idx, _name)| {
+            // Create a field reference for each column
+            // Match DuckDB's format: include rootReference (empty RootReference message)
+            Ok(substrait::proto::Expression {
+                rex_type: Some(substrait::proto::expression::RexType::Selection(Box::new(
+                    substrait::proto::expression::FieldReference {
+                        reference_type: Some(substrait::proto::expression::field_reference::ReferenceType::DirectReference(
+                            substrait::proto::expression::ReferenceSegment {
+                                reference_type: Some(substrait::proto::expression::reference_segment::ReferenceType::StructField(Box::new(
+                                    substrait::proto::expression::reference_segment::StructField {
+                                        field: idx as i32,
+                                        child: None,
+                                    }
+                                ))),
+                            }
+                        )),
+                        root_type: Some(substrait::proto::expression::field_reference::RootType::RootReference(
+                            substrait::proto::expression::field_reference::RootReference {}
+                        )),
+                    }
+                ))),
+            })
+        }).collect();
+
+        let grouping_expressions = grouping_expressions?;
+
+        // Create a single grouping with all column expressions (using deprecated field for DuckDB compatibility)
+        #[allow(deprecated)]
+        let grouping = substrait::proto::aggregate_rel::Grouping {
+            grouping_expressions: grouping_expressions.clone(), // Use deprecated field (DuckDB reads this)
+            expression_references: vec![], // Leave empty (DuckDB ignores this)
+        };
+
+        // Create AggregateRel with grouping but no measures (aggregates)
+        let aggregate_rel = substrait::proto::AggregateRel {
+            common: None,
+            input: Some(Box::new(input)),
+            groupings: vec![grouping],
+            measures: vec![], // Empty measures = DISTINCT
+            grouping_expressions: vec![], // Empty for deprecated approach (DuckDB uses grouping_expressions from Grouping)
+            advanced_extension: None,
+        };
+
+        // Wrap in Rel
+        Ok(substrait::proto::Rel {
+            rel_type: Some(substrait::proto::rel::RelType::Aggregate(Box::new(aggregate_rel))),
         })
     }
 

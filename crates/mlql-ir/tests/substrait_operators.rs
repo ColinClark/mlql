@@ -200,3 +200,45 @@ fn test_combined_pipeline() {
 
     println!("✅ Combined pipeline (filter + sort + take): {:?}", results);
 }
+
+#[test]
+fn test_distinct() {
+    let conn = Connection::open_in_memory().unwrap();
+    conn.execute_batch("
+        CREATE TABLE users (id INTEGER, name VARCHAR, age INTEGER);
+        INSERT INTO users VALUES
+            (1, 'Alice', 30),
+            (2, 'Bob', 25),
+            (1, 'Alice', 30),  -- Exact duplicate of row 1
+            (2, 'Bob', 25),    -- Exact duplicate of row 2
+            (3, 'Charlie', 35);
+    ").unwrap();
+
+    let schema_provider = setup_schema_provider();
+
+    // Test: from users | distinct
+    // Should return 3 unique rows (Alice 30, Bob 25, Charlie 35)
+    let program = Program {
+        pragma: None,
+        lets: vec![],
+        pipeline: Pipeline {
+            source: Source::Table {
+                name: "users".to_string(),
+                alias: None,
+            },
+            ops: vec![Operator::Distinct],
+        },
+    };
+
+    let translator = SubstraitTranslator::new(&schema_provider);
+    let plan = translator.translate(&program).expect("Translation should succeed");
+
+    let mut plan_bytes = Vec::new();
+    plan.encode(&mut plan_bytes).expect("Serialization should succeed");
+    println!("Distinct plan: {} bytes", plan_bytes.len());
+
+    // Execute and count distinct rows
+    let count: i64 = conn.query_row("SELECT COUNT(*) FROM from_substrait(?)", [plan_bytes], |row| row.get(0)).unwrap();
+    assert_eq!(count, 3, "Expected 3 distinct rows, got {}", count);
+    println!("✅ Distinct: {} unique rows", count);
+}
