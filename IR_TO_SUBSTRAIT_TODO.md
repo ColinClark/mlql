@@ -114,13 +114,15 @@ We just built the DuckDB substrait extension to **consume** Substrait plans, not
 - Column references resolve to field indices via schema context
 - Multiple sort keys supported (secondary sort handled correctly)
 
-### 2.5 Take/Limit Operator
-- [ ] Translate `Operator::Take` → `FetchRel`
-- [ ] Set limit value
-- [ ] Combine with existing plan
+### 2.5 Take/Limit Operator ✅
+- [x] Translate `Operator::Take` → `FetchRel`
+- [x] Set limit value using count_expr (new API)
+- [x] Combine with existing plan
+- [x] Add test test_take_operator
 
-**Test**: `from users | take 10` → FetchRel
-**Commit**: "feat(ir): translate take/limit operator"
+**Test**: ✅ `from users | take 10` → FetchRel
+**Commit**: ✅ "feat(ir): implement Take operator (FetchRel)"
+**Note**: Uses new Substrait API with `count_mode: CountExpr(Box<Expression>)` instead of deprecated `count` field
 
 ## Phase 3: Advanced Operators (Milestone 3)
 
