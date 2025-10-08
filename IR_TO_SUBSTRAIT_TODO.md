@@ -71,15 +71,28 @@ We just built the DuckDB substrait extension to **consume** Substrait plans, not
 - [x] Handle comparison ops (==, !=, <, >, <=, >=)
 - [x] Handle logical ops (AND, OR, NOT)
 - [x] Handle column references with schema context
+- [x] Implement function extension system
+- [x] Register functions with unique anchors
+- [x] Generate extension URIs and declarations
+- [x] Map operators to function signatures (e.g., "gt:i32_i32")
 
-**Test**: ✅ `test_filter_with_comparison` passes - `from users | filter age > 18` → FilterRel
-**Commit**: ✅ "feat(ir): implement Filter operator with column references"
+**Test**: ✅ `test_mlql_ir_to_substrait_execution` passes - `from users | filter age > 25` executes correctly!
+**Commit**: ✅ 6cb4125 "feat(ir): implement Substrait function extension system for Filter operator"
 
 **Schema Context Implementation**:
 - Pipeline retrieves schema from source via `get_output_names()`
 - Schema (Vec<String>) passed to `translate_operator()` and `translate_expr()`
 - Column names resolve to field indices via `schema.iter().position()`
 - Field references use Substrait StructField with index
+
+**Function Extension System**:
+- `FunctionRegistry` tracks used functions with HashMap (function_sig → anchor)
+- `generate_extensions()` creates extension URIs and declarations in Plan
+- Extension URI: `functions_comparison.yaml` from Substrait standard
+- Function signatures: "function:arg_types" format (e.g., "gt:i32_i32", "not:bool")
+- Each function gets unique anchor ID starting from 1
+- Binary ops: register in `translate_binary_op` before creating ScalarFunction
+- Unary ops: register in `translate_unary_op` before creating ScalarFunction
 
 ### 2.3 Project Operator (Select) ✅
 - [x] Translate `Operator::Select` → `ProjectRel`
