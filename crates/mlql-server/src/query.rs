@@ -135,9 +135,9 @@ pub async fn execute_ir_substrait(
 
 /// Load Substrait extension into DuckDB connection
 fn load_substrait_extension(conn: &duckdb::Connection) -> Result<(), Box<dyn std::error::Error>> {
-    // If SUBSTRAIT_EXTENSION_PATH is set, load the extension
+    // Try to load the Substrait extension
+    // Option 1: If SUBSTRAIT_EXTENSION_PATH is set, use that
     if let Ok(extension_path) = std::env::var("SUBSTRAIT_EXTENSION_PATH") {
-        // Check if extension file exists
         if !std::path::Path::new(&extension_path).exists() {
             return Err(format!(
                 "Substrait extension not found at: {}\n\
@@ -146,14 +146,28 @@ fn load_substrait_extension(conn: &duckdb::Connection) -> Result<(), Box<dyn std
             ).into());
         }
 
-        // Load extension (ignore error if already loaded)
-        conn.execute_batch(&format!("LOAD '{}'", extension_path)).ok();
+        conn.execute_batch(&format!("LOAD '{}'", extension_path))
+            .map_err(|e| format!("Failed to load extension from {}: {}", extension_path, e))?;
 
         tracing::info!("Loaded Substrait extension from: {}", extension_path);
     } else {
-        // Assume extension is built-in or available via system DuckDB
-        // Try a test query to see if from_substrait is available
-        tracing::info!("SUBSTRAIT_EXTENSION_PATH not set, assuming extension is built-in");
+        // Option 2: Try to install from DuckDB's extension repository
+        tracing::info!("SUBSTRAIT_EXTENSION_PATH not set, trying to load substrait extension");
+
+        // Try: INSTALL substrait; LOAD substrait;
+        match conn.execute_batch("INSTALL substrait; LOAD substrait;") {
+            Ok(_) => {
+                tracing::info!("Successfully loaded substrait extension from repository");
+            }
+            Err(e) => {
+                return Err(format!(
+                    "Failed to load substrait extension: {}\n\
+                     Please set SUBSTRAIT_EXTENSION_PATH to the path of your custom extension:\n\
+                     export SUBSTRAIT_EXTENSION_PATH=/Users/colin/Dev/truepop/mlql/duckdb-substrait-upgrade/build/release/extension/substrait/substrait.duckdb_extension",
+                    e
+                ).into());
+            }
+        }
     }
 
     Ok(())
