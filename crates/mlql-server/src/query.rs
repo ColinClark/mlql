@@ -3,6 +3,7 @@
 use mlql_duck::{DuckExecutor, QueryResult};
 use mlql_ir::{Pipeline, Program};
 use serde_json::json;
+use std::sync::Arc;
 
 /// Execute MLQL IR against DuckDB and return SQL + results
 pub async fn execute_ir(
@@ -34,6 +35,146 @@ pub async fn execute_ir(
     let json_result = result_to_json(&result)?;
 
     Ok((sql, json_result))
+}
+
+/// Execute MLQL IR via Substrait translation (new execution path)
+pub async fn execute_ir_substrait(
+    pipeline: Pipeline,
+    database: Option<String>,
+) -> Result<(String, serde_json::Value), Box<dyn std::error::Error>> {
+    use mlql_ir::substrait::SubstraitTranslator;
+    use crate::catalog::DuckDbSchemaProvider;
+    use prost::Message;
+
+    // 1. Open DuckDB connection
+    let conn = if let Some(db_path) = database {
+        duckdb::Connection::open(db_path)?
+    } else {
+        duckdb::Connection::open_in_memory()?
+    };
+    let conn = Arc::new(conn);
+
+    // 2. Load Substrait extension
+    load_substrait_extension(&conn)?;
+
+    // 3. Create schema provider
+    let schema_provider = DuckDbSchemaProvider::new(conn.clone());
+
+    // 4. Initialize translator
+    let translator = SubstraitTranslator::new(&schema_provider);
+
+    // 5. Convert Pipeline to Program
+    let program = Program {
+        pragma: None,
+        lets: vec![],
+        pipeline: pipeline.clone(),
+    };
+
+    // 6. Translate to Substrait
+    let plan = translator.translate(&program)
+        .map_err(|e| format!("Substrait translation failed: {}", e))?;
+
+    // 7. Serialize to protobuf
+    let mut plan_bytes = Vec::new();
+    plan.encode(&mut plan_bytes)
+        .map_err(|e| format!("Protobuf encoding failed: {}", e))?;
+
+    // 8. Execute via from_substrait()
+    let mut stmt = conn.prepare("SELECT * FROM from_substrait(?)")?;
+    let mut rows = stmt.query([plan_bytes.as_slice()])?;
+
+    // 9. Convert rows to JSON
+    let json_result = duckdb_rows_to_json(&mut rows)?;
+
+    // 10. Return plan info + results
+    let plan_info = format!("Substrait plan: {} bytes", plan_bytes.len());
+    Ok((plan_info, json_result))
+}
+
+/// Load Substrait extension into DuckDB connection
+fn load_substrait_extension(conn: &duckdb::Connection) -> Result<(), Box<dyn std::error::Error>> {
+    // Get extension path from environment or use default
+    let extension_path = std::env::var("SUBSTRAIT_EXTENSION_PATH")
+        .unwrap_or_else(|_| {
+            "/Users/colin/Dev/truepop/mlql/duckdb-substrait-upgrade/build/release/extension/substrait/substrait.duckdb_extension".to_string()
+        });
+
+    // Check if extension file exists
+    if !std::path::Path::new(&extension_path).exists() {
+        return Err(format!(
+            "Substrait extension not found at: {}\n\
+             Please build the extension or set SUBSTRAIT_EXTENSION_PATH environment variable.",
+            extension_path
+        ).into());
+    }
+
+    // Load extension (ignore error if already loaded)
+    conn.execute_batch(&format!("LOAD '{}'", extension_path)).ok();
+
+    Ok(())
+}
+
+/// Convert DuckDB rows to JSON format
+fn duckdb_rows_to_json(rows: &mut duckdb::Rows) -> Result<serde_json::Value, Box<dyn std::error::Error>> {
+    let mut json_rows = Vec::new();
+    let mut columns = Vec::new();
+
+    // Get column names from first row metadata
+    if let Some(first_row) = rows.next()? {
+        let col_count = first_row.as_ref().column_count();
+
+        for i in 0..col_count {
+            columns.push(first_row.as_ref().column_name(i)?.to_string());
+        }
+
+        // Process first row
+        let mut row_obj = serde_json::Map::new();
+        for (i, col_name) in columns.iter().enumerate() {
+            let value = duckdb_value_to_json(&first_row, i)?;
+            row_obj.insert(col_name.clone(), value);
+        }
+        json_rows.push(serde_json::Value::Object(row_obj));
+    }
+
+    // Process remaining rows
+    while let Some(row) = rows.next()? {
+        let mut row_obj = serde_json::Map::new();
+        for (i, col_name) in columns.iter().enumerate() {
+            let value = duckdb_value_to_json(&row, i)?;
+            row_obj.insert(col_name.clone(), value);
+        }
+        json_rows.push(serde_json::Value::Object(row_obj));
+    }
+
+    Ok(json!({
+        "columns": columns,
+        "rows": json_rows,
+        "row_count": json_rows.len()
+    }))
+}
+
+/// Convert DuckDB value to JSON
+fn duckdb_value_to_json(row: &duckdb::Row, idx: usize) -> Result<serde_json::Value, Box<dyn std::error::Error>> {
+    use duckdb::types::ValueRef;
+
+    match row.get_ref(idx)? {
+        ValueRef::Null => Ok(serde_json::Value::Null),
+        ValueRef::Boolean(b) => Ok(serde_json::Value::Bool(b)),
+        ValueRef::TinyInt(i) => Ok(serde_json::json!(i)),
+        ValueRef::SmallInt(i) => Ok(serde_json::json!(i)),
+        ValueRef::Int(i) => Ok(serde_json::json!(i)),
+        ValueRef::BigInt(i) => Ok(serde_json::json!(i)),
+        ValueRef::HugeInt(i) => Ok(serde_json::json!(i)),
+        ValueRef::UTinyInt(i) => Ok(serde_json::json!(i)),
+        ValueRef::USmallInt(i) => Ok(serde_json::json!(i)),
+        ValueRef::UInt(i) => Ok(serde_json::json!(i)),
+        ValueRef::UBigInt(i) => Ok(serde_json::json!(i)),
+        ValueRef::Float(f) => Ok(serde_json::json!(f)),
+        ValueRef::Double(f) => Ok(serde_json::json!(f)),
+        ValueRef::Text(s) => Ok(serde_json::Value::String(String::from_utf8_lossy(s).to_string())),
+        ValueRef::Blob(b) => Ok(serde_json::Value::String(format!("<blob {} bytes>", b.len()))),
+        _ => Ok(serde_json::Value::String("<unsupported>".to_string())),
+    }
 }
 
 /// Convert QueryResult to JSON

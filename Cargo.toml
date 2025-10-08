@@ -35,7 +35,7 @@ arrow = "56"
 
 # Substrait
 substrait = { version = "0.61", features = ["serde"] }
-prost = "0.13"
+prost = "0.14"
 
 # Async runtime (for server)
 tokio = { version = "1", features = ["full"] }
