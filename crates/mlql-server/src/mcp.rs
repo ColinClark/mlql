@@ -209,23 +209,23 @@ impl MlqlServerHandler {
 
         info!("Generated IR: {}", serde_json::to_string_pretty(&ir).unwrap_or_default());
 
-        // Step 3: Execute IR against DuckDB
-        let (sql, results) = query::execute_ir(ir.clone(), database)
+        // Step 3: Execute IR against DuckDB (uses MLQL_EXECUTION_MODE env var)
+        let (execution_info, results) = query::execute_ir_auto(ir.clone(), database)
             .await
             .map_err(|e| {
                 error!("Failed to execute query: {}", e);
                 CallToolError::from_message(format!("Failed to execute query: {}", e))
             })?;
 
-        info!("Generated SQL: {}", sql);
+        info!("Execution info: {}", execution_info);
         info!("Query results: {} rows", results.get("row_count").and_then(|v| v.as_u64()).unwrap_or(0));
 
         // Format response as MCP content
         let response_text = format!(
-            "Query: {}\n\nGenerated IR:\n{}\n\nGenerated SQL:\n{}\n\nResults:\n{}",
+            "Query: {}\n\nGenerated IR:\n{}\n\nExecution: {}\n\nResults:\n{}",
             query,
             serde_json::to_string_pretty(&ir).unwrap_or_default(),
-            sql,
+            execution_info,
             serde_json::to_string_pretty(&results).unwrap_or_default()
         );
 
