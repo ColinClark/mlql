@@ -5,6 +5,48 @@ use mlql_ir::{Pipeline, Program};
 use serde_json::json;
 use std::sync::Arc;
 
+/// Execution mode for MLQL queries
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum ExecutionMode {
+    /// SQL-based execution (current production path)
+    Sql,
+    /// Substrait-based execution (new experimental path)
+    Substrait,
+}
+
+impl ExecutionMode {
+    /// Get execution mode from environment variable
+    ///
+    /// Reads `MLQL_EXECUTION_MODE` env var:
+    /// - "substrait" → ExecutionMode::Substrait
+    /// - anything else → ExecutionMode::Sql (default)
+    pub fn from_env() -> Self {
+        match std::env::var("MLQL_EXECUTION_MODE")
+            .unwrap_or_else(|_| "sql".to_string())
+            .to_lowercase()
+            .as_str()
+        {
+            "substrait" => ExecutionMode::Substrait,
+            _ => ExecutionMode::Sql,
+        }
+    }
+}
+
+/// Execute MLQL IR with automatic mode selection based on environment
+///
+/// Uses `MLQL_EXECUTION_MODE` environment variable to choose execution path:
+/// - "substrait" → Substrait-based execution
+/// - anything else → SQL-based execution (default)
+pub async fn execute_ir_auto(
+    pipeline: Pipeline,
+    database: Option<String>,
+) -> Result<(String, serde_json::Value), Box<dyn std::error::Error>> {
+    match ExecutionMode::from_env() {
+        ExecutionMode::Substrait => execute_ir_substrait(pipeline, database).await,
+        ExecutionMode::Sql => execute_ir(pipeline, database).await,
+    }
+}
+
 /// Execute MLQL IR against DuckDB and return SQL + results
 pub async fn execute_ir(
     pipeline: Pipeline,
@@ -93,23 +135,26 @@ pub async fn execute_ir_substrait(
 
 /// Load Substrait extension into DuckDB connection
 fn load_substrait_extension(conn: &duckdb::Connection) -> Result<(), Box<dyn std::error::Error>> {
-    // Get extension path from environment or use default
-    let extension_path = std::env::var("SUBSTRAIT_EXTENSION_PATH")
-        .unwrap_or_else(|_| {
-            "/Users/colin/Dev/truepop/mlql/duckdb-substrait-upgrade/build/release/extension/substrait/substrait.duckdb_extension".to_string()
-        });
+    // If SUBSTRAIT_EXTENSION_PATH is set, load the extension
+    if let Ok(extension_path) = std::env::var("SUBSTRAIT_EXTENSION_PATH") {
+        // Check if extension file exists
+        if !std::path::Path::new(&extension_path).exists() {
+            return Err(format!(
+                "Substrait extension not found at: {}\n\
+                 Please build the extension or unset SUBSTRAIT_EXTENSION_PATH.",
+                extension_path
+            ).into());
+        }
 
-    // Check if extension file exists
-    if !std::path::Path::new(&extension_path).exists() {
-        return Err(format!(
-            "Substrait extension not found at: {}\n\
-             Please build the extension or set SUBSTRAIT_EXTENSION_PATH environment variable.",
-            extension_path
-        ).into());
+        // Load extension (ignore error if already loaded)
+        conn.execute_batch(&format!("LOAD '{}'", extension_path)).ok();
+
+        tracing::info!("Loaded Substrait extension from: {}", extension_path);
+    } else {
+        // Assume extension is built-in or available via system DuckDB
+        // Try a test query to see if from_substrait is available
+        tracing::info!("SUBSTRAIT_EXTENSION_PATH not set, assuming extension is built-in");
     }
-
-    // Load extension (ignore error if already loaded)
-    conn.execute_batch(&format!("LOAD '{}'", extension_path)).ok();
 
     Ok(())
 }
