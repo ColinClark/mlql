@@ -281,11 +281,97 @@ gh pr create --title "..." --body "..."
 **Phase 3 Status**:
 - ✅ 3.3 Distinct Operator (complete)
 - ✅ 3.2 GroupBy/Aggregate Operator (complete - sum only, other aggs pending)
-- ⏸️ 3.1 Join Operator (not started)
+- ✅ 3.1 Join Operator (complete)
 
 **Phase 4**: Integration & Testing (ready to start)
 
 ---
 
+## Session: 2025-10-08 (continued) - Join Operator Implementation
+
+### What We Built
+
+#### Join Operator (Phase 3.1)
+- **Commit**: f287e96 "feat(ir): implement Join operator with JoinRel translation and schema tracking"
+- **Key Implementation**:
+  - Translate Operator::Join → JoinRel
+  - Combined schema tracking: [left_columns..., right_columns...]
+  - Join condition translation with combined schema for field resolution
+  - JoinType enum mapping to Substrait values
+
+**Join Type Mapping** (Critical for correctness):
+- Inner → 1 (JOIN_TYPE_INNER)
+- Full → 2 (JOIN_TYPE_OUTER)
+- Left → 3 (JOIN_TYPE_LEFT)
+- Right → 4 (JOIN_TYPE_RIGHT)
+- Semi → 5 (JOIN_TYPE_LEFT_SEMI)
+- Anti → 6 (JOIN_TYPE_LEFT_ANTI)
+- Cross → Unsupported (needs special handling)
+
+### Technical Discoveries
+
+1. **Combined Schema for Joins**: Join output schema combines both sides:
+   ```
+   Left: [id, name]
+   Right: [order_id, user_id, amount]
+   Combined: [id, name, order_id, user_id, amount]
+   ```
+
+2. **Field References in Join Conditions**: Join condition must be translated with combined schema:
+   ```rust
+   // users.id == orders.user_id
+   // Must resolve both columns in combined schema: [id, name, order_id, user_id, amount]
+   ```
+
+3. **Schema Tracking Update**: `get_pipeline_output_names()` extended to handle Join:
+   ```rust
+   Operator::Join { source, .. } => {
+       let right_schema = self.get_output_names(source)?;
+       let mut output = current_schema.clone();
+       output.extend(right_schema);
+       output
+   }
+   ```
+
+### What Worked
+
+1. **Following GroupBy Pattern**: Used same structure as GroupBy for implementation
+2. **Import Fix**: Added JoinType to imports in translator.rs
+3. **Comprehensive Test**: test_join covers full end-to-end execution
+4. **All Tests Passing**: 7 tests verify no regressions
+
+### Testing Results
+
+**All 7 tests passing** ✅:
+- test_table_scan
+- test_take_limit
+- test_plan_generation
+- test_combined_pipeline
+- test_distinct
+- test_groupby
+- test_join (NEW!)
+
+**Join Test Output**:
+```
+Join plan: 306 bytes
+Join results: [(1, "Alice", 101, 1, 100), (1, "Alice", 102, 1, 200), (2, "Bob", 103, 2, 150)]
+✅ Join: 3 rows with correct values
+```
+
+### Next Steps
+
+**Phase 3 COMPLETE** 🎉:
+- ✅ 3.1 Join Operator
+- ✅ 3.2 GroupBy/Aggregate Operator
+- ✅ 3.3 Distinct Operator
+
+**Phase 4**: Integration & Testing (ready to start)
+- End-to-end test suite
+- Error handling improvements
+- Performance testing
+- Documentation
+
+---
+
 **Last Updated**: 2025-10-08
-**Current Phase**: Phase 3 Nearly Complete (GroupBy + Distinct done, Join pending)
+**Current Phase**: Phase 3 Complete! Ready for Phase 4
