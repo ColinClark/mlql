@@ -329,3 +329,95 @@ fn test_groupby() {
 
     println!("✅ GroupBy: 3 groups with correct totals");
 }
+
+#[test]
+fn test_join() {
+    use mlql_ir::{Expr, BinOp, ColumnRef, JoinType};
+
+    let conn = Connection::open_in_memory().unwrap();
+    conn.execute_batch("
+        CREATE TABLE users (id INTEGER, name VARCHAR);
+        CREATE TABLE orders (order_id INTEGER, user_id INTEGER, amount INTEGER);
+        INSERT INTO users VALUES (1, 'Alice'), (2, 'Bob');
+        INSERT INTO orders VALUES (101, 1, 100), (102, 1, 200), (103, 2, 150);
+    ").unwrap();
+
+    let mut schema_provider = MockSchemaProvider::new();
+    schema_provider.add_table(TableSchema {
+        name: "users".to_string(),
+        columns: vec![
+            ColumnInfo { name: "id".to_string(), data_type: "INTEGER".to_string(), nullable: true },
+            ColumnInfo { name: "name".to_string(), data_type: "VARCHAR".to_string(), nullable: true },
+        ],
+    });
+    schema_provider.add_table(TableSchema {
+        name: "orders".to_string(),
+        columns: vec![
+            ColumnInfo { name: "order_id".to_string(), data_type: "INTEGER".to_string(), nullable: true },
+            ColumnInfo { name: "user_id".to_string(), data_type: "INTEGER".to_string(), nullable: true },
+            ColumnInfo { name: "amount".to_string(), data_type: "INTEGER".to_string(), nullable: true },
+        ],
+    });
+
+    // Test: from users | join orders on users.id == orders.user_id
+    // Should return: (1, 'Alice', 101, 1, 100), (1, 'Alice', 102, 1, 200), (2, 'Bob', 103, 2, 150)
+    let program = Program {
+        pragma: None,
+        lets: vec![],
+        pipeline: Pipeline {
+            source: Source::Table {
+                name: "users".to_string(),
+                alias: None,
+            },
+            ops: vec![Operator::Join {
+                source: Source::Table {
+                    name: "orders".to_string(),
+                    alias: None,
+                },
+                on: Expr::BinaryOp {
+                    op: BinOp::Eq,
+                    left: Box::new(Expr::Column {
+                        col: ColumnRef {
+                            table: Some("users".to_string()),
+                            column: "id".to_string(),
+                        },
+                    }),
+                    right: Box::new(Expr::Column {
+                        col: ColumnRef {
+                            table: Some("orders".to_string()),
+                            column: "user_id".to_string(),
+                        },
+                    }),
+                },
+                join_type: Some(JoinType::Inner),
+            }],
+        },
+    };
+
+    let translator = SubstraitTranslator::new(&schema_provider);
+    let plan = translator.translate(&program).expect("Translation should succeed");
+
+    let mut plan_bytes = Vec::new();
+    plan.encode(&mut plan_bytes).expect("Serialization should succeed");
+    println!("Join plan: {} bytes", plan_bytes.len());
+
+    // Execute and get results
+    let mut stmt = conn.prepare("SELECT * FROM from_substrait(?)").unwrap();
+    let results: Vec<(i32, String, i32, i32, i32)> = stmt
+        .query_map([plan_bytes], |row| Ok((row.get(0)?, row.get(1)?, row.get(2)?, row.get(3)?, row.get(4)?)))
+        .unwrap()
+        .collect::<Result<Vec<_>, _>>()
+        .unwrap();
+
+    println!("Join results: {:?}", results);
+
+    // Check that we have 3 join results
+    assert_eq!(results.len(), 3, "Expected 3 join results");
+
+    // Check specific rows
+    assert!(results.contains(&(1, "Alice".to_string(), 101, 1, 100)));
+    assert!(results.contains(&(1, "Alice".to_string(), 102, 1, 200)));
+    assert!(results.contains(&(2, "Bob".to_string(), 103, 2, 150)));
+
+    println!("✅ Join: 3 rows with correct values");
+}

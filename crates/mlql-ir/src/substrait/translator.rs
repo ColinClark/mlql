@@ -1,6 +1,6 @@
 //! Core Substrait translator
 
-use crate::{Program, Pipeline, Source, Operator, Expr, Value, BinOp, UnOp, ColumnRef, Projection, SortKey, AggCall};
+use crate::{Program, Pipeline, Source, Operator, Expr, Value, BinOp, UnOp, ColumnRef, Projection, SortKey, AggCall, JoinType};
 use super::schema::SchemaProvider;
 use substrait::proto::Plan;
 use std::cell::RefCell;
@@ -189,6 +189,13 @@ impl<'a> SubstraitTranslator<'a> {
                     }
                     output
                 }
+                Operator::Join { source, .. } => {
+                    // Join output: [left_columns..., right_columns...]
+                    let right_schema = self.get_output_names(source)?;
+                    let mut output = current_schema.clone();
+                    output.extend(right_schema);
+                    output
+                }
                 // Most operators preserve the schema
                 Operator::Filter { .. } |
                 Operator::Sort { .. } |
@@ -339,6 +346,7 @@ impl<'a> SubstraitTranslator<'a> {
             Operator::Take { limit } => self.translate_take(input, *limit),
             Operator::Distinct => self.translate_distinct(input, schema),
             Operator::GroupBy { keys, aggs } => self.translate_groupby(input, keys, aggs, schema),
+            Operator::Join { source, on, join_type } => self.translate_join(input, source, on, join_type, schema),
             _ => Err(TranslateError::UnsupportedOperator(format!("Operator {:?} not yet supported", op))),
         }
     }
@@ -499,6 +507,49 @@ impl<'a> SubstraitTranslator<'a> {
         // Wrap in Rel
         Ok(substrait::proto::Rel {
             rel_type: Some(substrait::proto::rel::RelType::Aggregate(Box::new(aggregate_rel))),
+        })
+    }
+
+    fn translate_join(&self, left_input: substrait::proto::Rel, right_source: &Source, condition: &Expr, join_type: &Option<JoinType>, left_schema: &[String]) -> Result<substrait::proto::Rel, TranslateError> {
+        // Translate the right source (typically a table)
+        let right_rel = self.translate_source_with_projection(right_source, None)?;
+        let right_schema = self.get_output_names(right_source)?;
+
+        // Combined schema: [left_cols..., right_cols...]
+        let mut combined_schema = left_schema.to_vec();
+        combined_schema.extend(right_schema.iter().cloned());
+
+        // Translate the join condition with combined schema
+        let join_expr = self.translate_expr(condition, &combined_schema)?;
+
+        // Map MLQL JoinType to Substrait JoinType enum value
+        let substrait_join_type = match join_type {
+            None | Some(JoinType::Inner) => 1,  // JOIN_TYPE_INNER
+            Some(JoinType::Left) => 3,           // JOIN_TYPE_LEFT
+            Some(JoinType::Right) => 4,          // JOIN_TYPE_RIGHT
+            Some(JoinType::Full) => 2,           // JOIN_TYPE_OUTER (Full Outer)
+            Some(JoinType::Semi) => 5,           // JOIN_TYPE_LEFT_SEMI
+            Some(JoinType::Anti) => 6,           // JOIN_TYPE_LEFT_ANTI
+            Some(JoinType::Cross) => {
+                // Cross join is a special case - no condition
+                return Err(TranslateError::UnsupportedOperator("Cross join not yet supported".to_string()));
+            }
+        };
+
+        // Create JoinRel
+        let join_rel = substrait::proto::JoinRel {
+            common: None,
+            left: Some(Box::new(left_input)),
+            right: Some(Box::new(right_rel)),
+            expression: Some(Box::new(join_expr)),
+            post_join_filter: None,
+            r#type: substrait_join_type,
+            advanced_extension: None,
+        };
+
+        // Wrap in Rel
+        Ok(substrait::proto::Rel {
+            rel_type: Some(substrait::proto::rel::RelType::Join(Box::new(join_rel))),
         })
     }
 

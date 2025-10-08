@@ -150,14 +150,31 @@ We just built the DuckDB substrait extension to **consume** Substrait plans, not
 
 ## Phase 3: Advanced Operators (Milestone 3)
 
-### 3.1 Join Operator
-- [ ] Translate `Operator::Join` → `JoinRel`
-- [ ] Handle join types (Inner, Left, Right, Full)
-- [ ] Translate join condition
-- [ ] Handle right source (another table/subquery)
+### 3.1 Join Operator ✅
+- [x] Translate `Operator::Join` → `JoinRel`
+- [x] Handle join types (Inner, Left, Right, Full, Semi, Anti)
+- [x] Translate join condition with combined left+right schema
+- [x] Handle right source (another table/subquery)
+- [x] Update schema tracking for join output ([left_cols..., right_cols...])
+- [x] Map MLQL JoinType to Substrait enum values
 
-**Test**: `from users | join from orders on users.id == orders.user_id` → JoinRel
-**Commit**: "feat(ir): translate join operator"
+**Test**: ✅ `from users | join orders on users.id == orders.user_id` → JoinRel (test_join passes)
+**Tests**: ✅ All 7 tests passing: table_scan, take_limit, plan_generation, combined_pipeline, distinct, groupby, join
+**Commit**: Pending - "feat(ir): implement Join operator with JoinRel translation and schema tracking"
+
+**Implementation Details**:
+- JoinRel takes left (input) and right (source) relations
+- Combined schema: [left_columns..., right_columns...]
+- Join condition translated with combined schema for proper field resolution
+- JoinType mapping to Substrait enum:
+  - Inner → 1 (JOIN_TYPE_INNER)
+  - Full → 2 (JOIN_TYPE_OUTER)
+  - Left → 3 (JOIN_TYPE_LEFT)
+  - Right → 4 (JOIN_TYPE_RIGHT)
+  - Semi → 5 (JOIN_TYPE_LEFT_SEMI)
+  - Anti → 6 (JOIN_TYPE_LEFT_ANTI)
+  - Cross → Unsupported (would need special handling)
+- Schema tracking updated in `get_pipeline_output_names()` to handle joins
 
 ### 3.2 GroupBy/Aggregate Operator ✅
 - [x] Translate `Operator::GroupBy` → `AggregateRel`
