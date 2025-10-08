@@ -242,3 +242,90 @@ fn test_distinct() {
     assert_eq!(count, 3, "Expected 3 distinct rows, got {}", count);
     println!("✅ Distinct: {} unique rows", count);
 }
+
+#[test]
+fn test_groupby() {
+    use mlql_ir::{AggCall, Expr, ColumnRef};
+    use std::collections::HashMap;
+
+    let conn = Connection::open_in_memory().unwrap();
+    conn.execute_batch("
+        CREATE TABLE sales (id INTEGER, product VARCHAR, amount INTEGER);
+        INSERT INTO sales VALUES
+            (1, 'Apple', 100),
+            (2, 'Banana', 150),
+            (3, 'Apple', 200),
+            (4, 'Banana', 50),
+            (5, 'Cherry', 300);
+    ").unwrap();
+
+    // Setup schema provider for sales table
+    let mut schema_provider = MockSchemaProvider::new();
+    schema_provider.add_table(TableSchema {
+        name: "sales".to_string(),
+        columns: vec![
+            ColumnInfo { name: "id".to_string(), data_type: "INTEGER".to_string(), nullable: true },
+            ColumnInfo { name: "product".to_string(), data_type: "VARCHAR".to_string(), nullable: true },
+            ColumnInfo { name: "amount".to_string(), data_type: "INTEGER".to_string(), nullable: true },
+        ],
+    });
+
+    // Test: from sales | group by product { total: sum(amount) }
+    // Should return: Apple 300, Banana 200, Cherry 300
+    let mut aggs = HashMap::new();
+    aggs.insert("total".to_string(), AggCall {
+        func: "sum".to_string(),
+        args: vec![Expr::Column {
+            col: ColumnRef {
+                table: None,
+                column: "amount".to_string(),
+            },
+        }],
+    });
+
+    let program = Program {
+        pragma: None,
+        lets: vec![],
+        pipeline: Pipeline {
+            source: Source::Table {
+                name: "sales".to_string(),
+                alias: None,
+            },
+            ops: vec![Operator::GroupBy {
+                keys: vec![ColumnRef {
+                    table: None,
+                    column: "product".to_string(),
+                }],
+                aggs,
+            }],
+        },
+    };
+
+    let translator = SubstraitTranslator::new(&schema_provider);
+    let plan = translator.translate(&program).expect("Translation should succeed");
+
+    let mut plan_bytes = Vec::new();
+    plan.encode(&mut plan_bytes).expect("Serialization should succeed");
+    println!("GroupBy plan: {} bytes", plan_bytes.len());
+
+    // Execute and get results
+    let mut stmt = conn.prepare("SELECT * FROM from_substrait(?)").unwrap();
+    let results: Vec<(String, i64)> = stmt
+        .query_map([plan_bytes], |row| Ok((row.get(0)?, row.get(1)?)))
+        .unwrap()
+        .collect::<Result<Vec<_>, _>>()
+        .unwrap();
+
+    println!("GroupBy results: {:?}", results);
+
+    // Check that we have 3 groups
+    assert_eq!(results.len(), 3, "Expected 3 groups");
+
+    // Check totals (order may vary)
+    let totals: HashMap<String, i64> = results.into_iter().collect();
+    assert_eq!(totals.get("Apple"), Some(&300));
+    assert_eq!(totals.get("Banana"), Some(&200));
+    assert_eq!(totals.get("Cherry"), Some(&300));
+
+    println!("✅ GroupBy: 3 groups with correct totals");
+}

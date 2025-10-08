@@ -1,6 +1,6 @@
 //! Core Substrait translator
 
-use crate::{Program, Pipeline, Source, Operator, Expr, Value, BinOp, UnOp, ColumnRef, Projection, SortKey};
+use crate::{Program, Pipeline, Source, Operator, Expr, Value, BinOp, UnOp, ColumnRef, Projection, SortKey, AggCall};
 use super::schema::SchemaProvider;
 use substrait::proto::Plan;
 use std::cell::RefCell;
@@ -75,8 +75,8 @@ impl<'a> SubstraitTranslator<'a> {
         // Translate the main pipeline to a relation
         let root_rel = self.translate_pipeline(&program.pipeline)?;
 
-        // Extract column names from the source for the root
-        let names = self.get_output_names(&program.pipeline.source)?;
+        // Calculate the FINAL output column names based on the pipeline
+        let names = self.get_pipeline_output_names(&program.pipeline)?;
 
         // Wrap in PlanRel
         let plan_rel = substrait::proto::PlanRel {
@@ -115,10 +115,11 @@ impl<'a> SubstraitTranslator<'a> {
             return (vec![], vec![]);
         }
 
-        // Create single extension URI for Substrait standard functions
+        // Create extension URI for Substrait standard functions
+        // Note: functions_arithmetic.yaml includes both arithmetic AND aggregate functions (sum, count, avg, etc.)
         let extension_uri = substrait::proto::extensions::SimpleExtensionUri {
             extension_uri_anchor: 1,
-            uri: "https://github.com/substrait-io/substrait/blob/main/extensions/functions_comparison.yaml".to_string(),
+            uri: "https://github.com/substrait-io/substrait/blob/main/extensions/functions_arithmetic.yaml".to_string(),
         };
 
         // Create extension function declarations
@@ -151,12 +152,81 @@ impl<'a> SubstraitTranslator<'a> {
         }
     }
 
+    /// Calculate the FINAL output schema of a pipeline after all operators
+    fn get_pipeline_output_names(&self, pipeline: &Pipeline) -> Result<Vec<String>, TranslateError> {
+        let mut current_schema = self.get_output_names(&pipeline.source)?;
+
+        // Trace through operators to calculate final schema
+        for op in &pipeline.ops {
+            current_schema = match op {
+                Operator::Select { projections } => {
+                    // Select changes the schema to the projected columns
+                    let mut result = Vec::new();
+                    for (idx, proj) in projections.iter().enumerate() {
+                        match proj {
+                            Projection::Expr(Expr::Column { col }) => {
+                                result.push(col.column.clone());
+                            }
+                            Projection::Aliased { alias, .. } => {
+                                result.push(alias.clone());
+                            }
+                            Projection::Expr(_) => {
+                                // For non-column expressions without alias, generate name
+                                result.push(format!("expr_{}", idx));
+                            }
+                        }
+                    }
+                    result
+                }
+                Operator::GroupBy { keys, aggs } => {
+                    // GroupBy output: grouping keys + aggregate aliases
+                    let mut output = Vec::new();
+                    for key in keys {
+                        output.push(key.column.clone());
+                    }
+                    for (alias, _) in aggs {
+                        output.push(alias.clone());
+                    }
+                    output
+                }
+                // Most operators preserve the schema
+                Operator::Filter { .. } |
+                Operator::Sort { .. } |
+                Operator::Take { .. } |
+                Operator::Distinct => {
+                    current_schema // No change
+                }
+                _ => {
+                    return Err(TranslateError::UnsupportedOperator(format!("Output schema calculation not implemented for operator: {:?}", op)));
+                }
+            };
+        }
+
+        Ok(current_schema)
+    }
+
     fn translate_pipeline(&self, pipeline: &Pipeline) -> Result<substrait::proto::Rel, TranslateError> {
+        // Check if we have a GroupBy operator that needs projection in Read
+        let needs_projection = pipeline.ops.iter().any(|op| matches!(op, Operator::GroupBy { .. }));
+
+        let projection_fields = if needs_projection {
+            // Calculate which columns are needed for GroupBy
+            self.calculate_groupby_projection(pipeline)?
+        } else {
+            None
+        };
+
         // Start with the source and get the initial schema
-        let mut rel = self.translate_source(&pipeline.source)?;
+        let mut rel = self.translate_source_with_projection(&pipeline.source, projection_fields.as_ref())?;
 
         // Get the schema context from the source
-        let current_schema = self.get_output_names(&pipeline.source)?;
+        let current_schema = if let Some(ref fields) = projection_fields {
+            // If projection is applied, schema is the projected columns
+            let full_schema = self.get_output_names(&pipeline.source)?;
+            fields.iter().map(|&idx| full_schema[idx].clone()).collect()
+        } else {
+            self.get_output_names(&pipeline.source)?
+        };
 
         // Apply operators on top of the source relation
         for op in &pipeline.ops {
@@ -167,6 +237,100 @@ impl<'a> SubstraitTranslator<'a> {
         Ok(rel)
     }
 
+    fn calculate_groupby_projection(&self, pipeline: &Pipeline) -> Result<Option<Vec<usize>>, TranslateError> {
+        // Find GroupBy operator and collect needed columns
+        for op in &pipeline.ops {
+            if let Operator::GroupBy { keys, aggs } = op {
+                let full_schema = self.get_output_names(&pipeline.source)?;
+                let mut needed_indices = Vec::new();
+
+                // Add grouping key column indices
+                for key in keys {
+                    let idx = full_schema.iter().position(|name| name == &key.column)
+                        .ok_or_else(|| TranslateError::Translation(format!("Column '{}' not found", key.column)))?;
+                    if !needed_indices.contains(&idx) {
+                        needed_indices.push(idx);
+                    }
+                }
+
+                // Add aggregate argument column indices
+                for agg_call in aggs.values() {
+                    for expr in &agg_call.args {
+                        if let Expr::Column { col } = expr {
+                            let idx = full_schema.iter().position(|name| name == &col.column)
+                                .ok_or_else(|| TranslateError::Translation(format!("Column '{}' not found", col.column)))?;
+                            if !needed_indices.contains(&idx) {
+                                needed_indices.push(idx);
+                            }
+                        }
+                    }
+                }
+
+                return Ok(Some(needed_indices));
+            }
+        }
+        Ok(None)
+    }
+
+    fn translate_source_with_projection(&self, source: &Source, projection: Option<&Vec<usize>>) -> Result<substrait::proto::Rel, TranslateError> {
+        match source {
+            Source::Table { name, alias: _ } => {
+                // Look up schema from provider
+                let schema = self.schema_provider
+                    .get_table_schema(name)
+                    .map_err(TranslateError::Schema)?;
+
+                // Build NamedStruct for base_schema
+                let named_struct = substrait::proto::NamedStruct {
+                    names: schema.columns.iter().map(|c| c.name.clone()).collect(),
+                    r#struct: Some(substrait::proto::r#type::Struct {
+                        types: schema.columns.iter().map(|c| {
+                            self.map_type(&c.data_type, c.nullable)
+                        }).collect(),
+                        type_variation_reference: 0,
+                        nullability: substrait::proto::r#type::Nullability::Required as i32,
+                    }),
+                };
+
+                // Create projection if needed
+                let projection_expr = projection.map(|fields| {
+                    substrait::proto::expression::MaskExpression {
+                        select: Some(substrait::proto::expression::mask_expression::StructSelect {
+                            struct_items: fields.iter().map(|&idx| {
+                                substrait::proto::expression::mask_expression::StructItem {
+                                    field: idx as i32,
+                                    child: None,
+                                }
+                            }).collect(),
+                        }),
+                        maintain_singular_struct: true,
+                    }
+                });
+
+                // Create ReadRel with NamedTable and optional projection
+                let read_rel = substrait::proto::ReadRel {
+                    common: None,
+                    base_schema: Some(named_struct),
+                    filter: None,
+                    best_effort_filter: None,
+                    projection: projection_expr,
+                    advanced_extension: None,
+                    read_type: Some(substrait::proto::read_rel::ReadType::NamedTable(
+                        substrait::proto::read_rel::NamedTable {
+                            names: vec![name.clone()],
+                            advanced_extension: None,
+                        },
+                    )),
+                };
+
+                Ok(substrait::proto::Rel {
+                    rel_type: Some(substrait::proto::rel::RelType::Read(Box::new(read_rel))),
+                })
+            }
+            _ => Err(TranslateError::UnsupportedOperator("Only Table sources supported currently".to_string())),
+        }
+    }
+
     fn translate_operator(&self, op: &Operator, input: substrait::proto::Rel, schema: &[String]) -> Result<substrait::proto::Rel, TranslateError> {
         match op {
             Operator::Filter { condition } => self.translate_filter(input, condition, schema),
@@ -174,6 +338,7 @@ impl<'a> SubstraitTranslator<'a> {
             Operator::Sort { keys } => self.translate_sort(input, keys, schema),
             Operator::Take { limit } => self.translate_take(input, *limit),
             Operator::Distinct => self.translate_distinct(input, schema),
+            Operator::GroupBy { keys, aggs } => self.translate_groupby(input, keys, aggs, schema),
             _ => Err(TranslateError::UnsupportedOperator(format!("Operator {:?} not yet supported", op))),
         }
     }
@@ -337,6 +502,169 @@ impl<'a> SubstraitTranslator<'a> {
         })
     }
 
+    fn translate_groupby(&self, input: substrait::proto::Rel, keys: &[ColumnRef], aggs: &HashMap<String, AggCall>, schema: &[String]) -> Result<substrait::proto::Rel, TranslateError> {
+        // GroupBy translates to AggregateRel with:
+        // - grouping_expressions: the grouping keys
+        // - measures: the aggregate functions
+        //
+        // IMPORTANT: Since we add projection to ReadRel, the schema passed here is the PROJECTED schema.
+        // We use rootReference to refer back to the Read's projected output.
+        //
+        // NOTE: Like Distinct, we use the deprecated `grouping_expressions` field for DuckDB compatibility
+
+        // Create grouping expressions from the keys with rootReference
+        let grouping_expressions: Result<Vec<_>, _> = keys.iter().map(|key| {
+            // Find the column index in the projected schema
+            let idx = schema.iter().position(|name| name == &key.column)
+                .ok_or_else(|| TranslateError::Translation(format!("Column '{}' not found in schema", key.column)))?;
+
+            // Create field reference WITH rootReference (DuckDB format)
+            Ok(substrait::proto::Expression {
+                rex_type: Some(substrait::proto::expression::RexType::Selection(Box::new(
+                    substrait::proto::expression::FieldReference {
+                        reference_type: Some(substrait::proto::expression::field_reference::ReferenceType::DirectReference(
+                            substrait::proto::expression::ReferenceSegment {
+                                reference_type: Some(substrait::proto::expression::reference_segment::ReferenceType::StructField(Box::new(
+                                    substrait::proto::expression::reference_segment::StructField {
+                                        field: idx as i32,
+                                        child: None,
+                                    }
+                                ))),
+                            }
+                        )),
+                        root_type: Some(substrait::proto::expression::field_reference::RootType::RootReference(
+                            substrait::proto::expression::field_reference::RootReference {}
+                        )),
+                    }
+                ))),
+            })
+        }).collect();
+
+        let grouping_expressions = grouping_expressions?;
+
+        // Create a single grouping (using deprecated field for DuckDB compatibility)
+        #[allow(deprecated)]
+        let grouping = substrait::proto::aggregate_rel::Grouping {
+            grouping_expressions: grouping_expressions.clone(),
+            expression_references: vec![],
+        };
+
+        // Create measures (aggregate functions) with rootReference
+        let measures: Result<Vec<_>, _> = aggs.iter().map(|(name, agg_call)| {
+            self.translate_aggregate_with_root(agg_call, schema, name)
+        }).collect();
+
+        let measures = measures?;
+
+        // Create AggregateRel
+        let aggregate_rel = substrait::proto::AggregateRel {
+            common: None,
+            input: Some(Box::new(input)),
+            groupings: vec![grouping],
+            measures,
+            grouping_expressions: vec![], // Empty for deprecated approach
+            advanced_extension: None,
+        };
+
+        // Wrap in Rel
+        Ok(substrait::proto::Rel {
+            rel_type: Some(substrait::proto::rel::RelType::Aggregate(Box::new(aggregate_rel))),
+        })
+    }
+
+    fn translate_aggregate_with_root(&self, agg_call: &AggCall, schema: &[String], _name: &str) -> Result<substrait::proto::aggregate_rel::Measure, TranslateError> {
+        // Translate aggregate function arguments with rootReference
+        let arguments: Result<Vec<_>, _> = agg_call.args.iter().map(|expr| {
+            let expr_result = match expr {
+                Expr::Column { col } => self.translate_column_ref_with_root(col, schema, true)?,
+                _ => self.translate_expr(expr, schema)?,
+            };
+            Ok(substrait::proto::FunctionArgument {
+                arg_type: Some(substrait::proto::function_argument::ArgType::Value(expr_result)),
+            })
+        }).collect();
+
+        let arguments = arguments?;
+
+        // Register the aggregate function and get its anchor
+        let function_sig = format!("{}:i32", agg_call.func);
+        let function_anchor = self.function_registry.borrow_mut().register(&function_sig);
+
+        // Create output type for aggregate function (i64 for sum)
+        let output_type = Some(substrait::proto::Type {
+            kind: Some(substrait::proto::r#type::Kind::I64(
+                substrait::proto::r#type::I64 {
+                    type_variation_reference: 0,
+                    nullability: substrait::proto::r#type::Nullability::Nullable as i32,
+                }
+            )),
+        });
+
+        // Create AggregateFunction
+        let agg_function = substrait::proto::AggregateFunction {
+            function_reference: function_anchor,
+            arguments,
+            sorts: vec![],
+            invocation: 0,
+            phase: 0,
+            output_type,
+            options: vec![],
+            #[allow(deprecated)]
+            args: vec![],
+        };
+
+        Ok(substrait::proto::aggregate_rel::Measure {
+            measure: Some(agg_function),
+            filter: None,
+        })
+    }
+
+    fn translate_aggregate(&self, agg_call: &AggCall, schema: &[String], _name: &str) -> Result<substrait::proto::aggregate_rel::Measure, TranslateError> {
+        // Translate aggregate function arguments
+        let arguments: Result<Vec<_>, _> = agg_call.args.iter().map(|expr| {
+            let expr_result = self.translate_expr(expr, schema)?;
+            Ok(substrait::proto::FunctionArgument {
+                arg_type: Some(substrait::proto::function_argument::ArgType::Value(expr_result)),
+            })
+        }).collect();
+
+        let arguments = arguments?;
+
+        // Register the aggregate function and get its anchor
+        // Use proper type signature (i32 for INTEGER columns)
+        let function_sig = format!("{}:i32", agg_call.func);
+        let function_anchor = self.function_registry.borrow_mut().register(&function_sig);
+
+        // Create output type for aggregate function (i64 for sum)
+        let output_type = Some(substrait::proto::Type {
+            kind: Some(substrait::proto::r#type::Kind::I64(
+                substrait::proto::r#type::I64 {
+                    type_variation_reference: 0,
+                    nullability: substrait::proto::r#type::Nullability::Nullable as i32,
+                }
+            )),
+        });
+
+        // Create AggregateFunction
+        let agg_function = substrait::proto::AggregateFunction {
+            function_reference: function_anchor,
+            arguments,
+            sorts: vec![],
+            invocation: 0, // AGGREGATION_INVOCATION_UNSPECIFIED
+            phase: 0, // AGGREGATION_PHASE_UNSPECIFIED
+            output_type,
+            options: vec![],
+            #[allow(deprecated)]
+            args: vec![], // Deprecated field
+        };
+
+        // Create Measure
+        Ok(substrait::proto::aggregate_rel::Measure {
+            measure: Some(agg_function),
+            filter: None,
+        })
+    }
+
     fn translate_expr(&self, expr: &Expr, schema: &[String]) -> Result<substrait::proto::Expression, TranslateError> {
         match expr {
             Expr::Literal { value } => self.translate_literal(value),
@@ -385,6 +713,10 @@ impl<'a> SubstraitTranslator<'a> {
     }
 
     fn translate_column_ref(&self, col: &ColumnRef, schema: &[String]) -> Result<substrait::proto::Expression, TranslateError> {
+        self.translate_column_ref_with_root(col, schema, false)
+    }
+
+    fn translate_column_ref_with_root(&self, col: &ColumnRef, schema: &[String], use_root_reference: bool) -> Result<substrait::proto::Expression, TranslateError> {
         // Resolve column name to field index
         let column_name = &col.column;
 
@@ -394,6 +726,7 @@ impl<'a> SubstraitTranslator<'a> {
             .ok_or_else(|| TranslateError::Translation(
                 format!("Column '{}' not found in schema. Available columns: {:?}", column_name, schema)
             ))?;
+
 
         // Create a FieldReference (direct field reference by index)
         let field_ref = substrait::proto::expression::FieldReference {
@@ -407,7 +740,13 @@ impl<'a> SubstraitTranslator<'a> {
                     )),
                 }
             )),
-            root_type: None, // Type inference
+            root_type: if use_root_reference {
+                Some(substrait::proto::expression::field_reference::RootType::RootReference(
+                    substrait::proto::expression::field_reference::RootReference {}
+                ))
+            } else {
+                None
+            },
         };
 
         Ok(substrait::proto::Expression {

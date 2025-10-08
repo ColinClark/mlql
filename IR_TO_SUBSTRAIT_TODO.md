@@ -159,14 +159,25 @@ We just built the DuckDB substrait extension to **consume** Substrait plans, not
 **Test**: `from users | join from orders on users.id == orders.user_id` → JoinRel
 **Commit**: "feat(ir): translate join operator"
 
-### 3.2 GroupBy/Aggregate Operator
-- [ ] Translate `Operator::GroupBy` → `AggregateRel`
-- [ ] Handle group keys
-- [ ] Translate aggregate functions (sum, count, avg, min, max)
-- [ ] Map MLQL aggs → Substrait agg functions
+### 3.2 GroupBy/Aggregate Operator ✅
+- [x] Translate `Operator::GroupBy` → `AggregateRel`
+- [x] Handle group keys with rootReference
+- [x] Translate aggregate functions (sum implemented, others pending)
+- [x] Map MLQL aggs → Substrait agg functions
+- [x] Add projection to ReadRel for GroupBy
+- [x] Calculate correct output schema for RelRoot
+- [x] Implement `get_pipeline_output_names()` to track schema transformations
 
-**Test**: `from sales | group by product { total: sum(amount) }` → AggregateRel
-**Commit**: "feat(ir): translate groupby/aggregate operator"
+**Test**: ✅ `from sales | group by product { total: sum(amount) }` → AggregateRel (test_groupby passes)
+**Commit**: Pending - "feat(ir): implement GroupBy operator with ReadRel projection and schema tracking"
+
+**Implementation Details**:
+- Uses AggregateRel with grouping keys and measures
+- Projection in ReadRel filters columns to [grouping_keys... , aggregate_args...]
+- Both grouping expressions and measures use rootReference
+- RelRoot names calculated via `get_pipeline_output_names()` to reflect final schema
+- Final output schema: [grouping_key_names... , aggregate_alias_names...]
+- Function extension system registers aggregate functions (sum:i32)
 
 ### 3.3 Distinct Operator ✅
 - [x] Translate `Operator::Distinct` → `AggregateRel` with no measures
