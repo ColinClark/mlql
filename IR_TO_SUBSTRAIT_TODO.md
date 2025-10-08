@@ -123,8 +123,17 @@ We just built the DuckDB substrait extension to **consume** Substrait plans, not
 
 **Test**: ✅ `from users | take 2` → FetchRel (returns 2 rows correctly)
 **Tests**: ✅ test_table_scan, test_take_limit, test_plan_generation all pass
-**Commit**: Pending - "feat(ir): implement Take operator with DuckDB-compatible deprecated variants"
+**Commit**: ✅ dd08edf "feat(ir): implement Take operator and integration test suite"
 **Note**: Uses deprecated `OffsetMode::Offset(i64)` and `CountMode::Count(i64)` oneof variants because DuckDB v1.3 extension calls the deprecated `.offset()` and `.count()` accessor methods. The new `count_mode: CountExpr` API is not yet supported by DuckDB.
+
+**🎉 MILESTONE: Phase 2 Complete - All Core Operators Implemented!**
+- ✅ Table source (ReadRel)
+- ✅ Filter operator (FilterRel) - structure complete, needs function URIs
+- ✅ Select operator (ProjectRel)
+- ✅ Sort operator (SortRel)
+- ✅ Take operator (FetchRel)
+- ✅ Integration test suite with custom DuckDB build
+- ✅ End-to-end execution: MLQL IR → Substrait → DuckDB → Results
 
 ## Phase 3: Advanced Operators (Milestone 3)
 
