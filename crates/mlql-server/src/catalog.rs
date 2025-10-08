@@ -3,6 +3,7 @@
 use duckdb::{Connection, Result as DuckResult};
 use serde::{Deserialize, Serialize};
 use std::path::Path;
+use std::sync::Arc;
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct TableCatalog {
@@ -182,5 +183,58 @@ impl DatabaseCatalog {
         }
 
         md
+    }
+}
+
+/// DuckDB-backed schema provider for Substrait translation
+///
+/// Queries the DuckDB information_schema at runtime to resolve table schemas.
+/// Holds a reference to a DuckDB connection for catalog queries.
+pub struct DuckDbSchemaProvider {
+    conn: Arc<Connection>,
+}
+
+impl DuckDbSchemaProvider {
+    /// Create a new schema provider with the given DuckDB connection
+    pub fn new(conn: Arc<Connection>) -> Self {
+        Self { conn }
+    }
+}
+
+impl mlql_ir::substrait::SchemaProvider for DuckDbSchemaProvider {
+    fn get_table_schema(&self, table_name: &str) -> Result<mlql_ir::substrait::TableSchema, String> {
+        // Query information_schema for column information
+        let query = "
+            SELECT column_name, data_type, is_nullable
+            FROM information_schema.columns
+            WHERE table_name = ?
+            ORDER BY ordinal_position
+        ";
+
+        let mut stmt = self.conn.prepare(query)
+            .map_err(|e| format!("Failed to prepare schema query: {}", e))?;
+
+        let columns: Result<Vec<_>, _> = stmt
+            .query_map([table_name], |row| {
+                Ok(mlql_ir::substrait::ColumnInfo {
+                    name: row.get(0)?,
+                    data_type: row.get(1)?,
+                    nullable: row.get::<_, String>(2)? == "YES",
+                })
+            })
+            .map_err(|e| format!("Schema query failed: {}", e))?
+            .collect();
+
+        let columns = columns
+            .map_err(|e| format!("Failed to read schema rows: {}", e))?;
+
+        if columns.is_empty() {
+            return Err(format!("Table '{}' not found in database", table_name));
+        }
+
+        Ok(mlql_ir::substrait::TableSchema {
+            name: table_name.to_string(),
+            columns,
+        })
     }
 }
