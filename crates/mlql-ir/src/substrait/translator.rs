@@ -126,7 +126,7 @@ impl FunctionRegistry {
 /// - Logical: `and`, `or`, `not`
 /// - String: `like`, `ilike`
 /// - Arithmetic: `add`, `subtract`, `multiply`, `divide`
-/// - Aggregate: `sum` (more coming)
+/// - Aggregate: `sum`, `count`, `avg`, `min`, `max`
 ///
 /// Functions are registered with unique anchor IDs and extension URIs as per Substrait spec.
 pub struct SubstraitTranslator<'a> {

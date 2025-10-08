@@ -69,7 +69,7 @@
 //! | `sort` | `SortRel` | ✅ Complete |
 //! | `take` | `FetchRel` | ✅ Complete |
 //! | `distinct` | `AggregateRel` | ✅ Complete |
-//! | `group by` | `AggregateRel` | ✅ Complete (sum only) |
+//! | `group by` | `AggregateRel` | ✅ Complete (sum, count, avg, min, max) |
 //! | `join` | `JoinRel` | ✅ Complete |
 //!
 //! ## Future Work
@@ -77,7 +77,6 @@
 //! - Window functions (`WindowRel`)
 //! - Set operations (`SetRel` for UNION/EXCEPT/INTERSECT)
 //! - Subquery sources (`SubPipeline`)
-//! - Additional aggregate functions (avg, min, max, count)
 //!
 //! # Schema Provider
 //!
