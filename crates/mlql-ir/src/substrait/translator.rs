@@ -55,7 +55,80 @@ impl FunctionRegistry {
     }
 }
 
-/// Translator for MLQL IR → Substrait
+/// Translator for MLQL IR → Substrait protocol buffers.
+///
+/// Converts MLQL's JSON intermediate representation into Substrait plans that can be
+/// executed by Substrait-compatible engines like DuckDB.
+///
+/// # Example
+///
+/// ```rust
+/// use mlql_ir::{Program, Pipeline, Source};
+/// use mlql_ir::substrait::{SubstraitTranslator, MockSchemaProvider, TableSchema, ColumnInfo};
+/// use prost::Message;
+///
+/// // Set up schema
+/// let mut schema_provider = MockSchemaProvider::new();
+/// schema_provider.add_table(TableSchema {
+///     name: "users".to_string(),
+///     columns: vec![
+///         ColumnInfo { name: "id".to_string(), data_type: "INTEGER".to_string(), nullable: true },
+///         ColumnInfo { name: "name".to_string(), data_type: "VARCHAR".to_string(), nullable: true },
+///     ],
+/// });
+///
+/// // Create IR
+/// let program = Program {
+///     pragma: None,
+///     lets: vec![],
+///     pipeline: Pipeline {
+///         source: Source::Table { name: "users".to_string(), alias: None },
+///         ops: vec![],
+///     },
+/// };
+///
+/// // Translate to Substrait
+/// let translator = SubstraitTranslator::new(&schema_provider);
+/// let plan = translator.translate(&program).unwrap();
+///
+/// // Serialize for execution
+/// let mut bytes = Vec::new();
+/// plan.encode(&mut bytes).unwrap();
+/// ```
+///
+/// # Schema Tracking
+///
+/// The translator tracks schema transformations through the pipeline:
+/// - `from table` → initial table schema
+/// - `select [a, b]` → projected columns `[a, b]`
+/// - `group by key { agg: sum(x) }` → `[key, agg]`
+/// - `join orders on id == order_id` → `[left_cols..., right_cols...]`
+///
+/// Schema tracking ensures correct field references throughout the plan.
+///
+/// # Operator Mapping
+///
+/// | MLQL Operator | Substrait Relation |
+/// |---------------|-------------------|
+/// | `from table` | `ReadRel` |
+/// | `filter` | `FilterRel` |
+/// | `select` | `ProjectRel` |
+/// | `sort` | `SortRel` |
+/// | `take` | `FetchRel` |
+/// | `distinct` | `AggregateRel` (group by all) |
+/// | `group by` | `AggregateRel` |
+/// | `join` | `JoinRel` |
+///
+/// # Function Extensions
+///
+/// The translator automatically registers Substrait standard functions used in expressions:
+/// - Comparison: `eq`, `ne`, `lt`, `gt`, `le`, `ge`
+/// - Logical: `and`, `or`, `not`
+/// - String: `like`, `ilike`
+/// - Arithmetic: `add`, `subtract`, `multiply`, `divide`
+/// - Aggregate: `sum` (more coming)
+///
+/// Functions are registered with unique anchor IDs and extension URIs as per Substrait spec.
 pub struct SubstraitTranslator<'a> {
     schema_provider: &'a dyn SchemaProvider,
     /// Function registry (using RefCell for interior mutability)
@@ -63,6 +136,10 @@ pub struct SubstraitTranslator<'a> {
 }
 
 impl<'a> SubstraitTranslator<'a> {
+    /// Create a new translator with the given schema provider.
+    ///
+    /// The schema provider is used to look up table schemas (column names and types)
+    /// during translation.
     pub fn new(schema_provider: &'a dyn SchemaProvider) -> Self {
         Self {
             schema_provider,
@@ -70,7 +147,40 @@ impl<'a> SubstraitTranslator<'a> {
         }
     }
 
-    /// Translate a Program to a Substrait Plan
+    /// Translate an MLQL IR Program to a Substrait Plan.
+    ///
+    /// # Arguments
+    ///
+    /// * `program` - The MLQL IR program to translate
+    ///
+    /// # Returns
+    ///
+    /// A Substrait `Plan` containing the translated relation tree, or a `TranslateError`
+    /// if translation fails (e.g., unknown table, unsupported operator).
+    ///
+    /// # Example
+    ///
+    /// ```rust
+    /// # use mlql_ir::{Program, Pipeline, Source};
+    /// # use mlql_ir::substrait::{SubstraitTranslator, MockSchemaProvider, TableSchema, ColumnInfo};
+    /// # let mut schema_provider = MockSchemaProvider::new();
+    /// # schema_provider.add_table(TableSchema {
+    /// #     name: "users".to_string(),
+    /// #     columns: vec![
+    /// #         ColumnInfo { name: "id".to_string(), data_type: "INTEGER".to_string(), nullable: true },
+    /// #     ],
+    /// # });
+    /// # let program = Program {
+    /// #     pragma: None,
+    /// #     lets: vec![],
+    /// #     pipeline: Pipeline {
+    /// #         source: Source::Table { name: "users".to_string(), alias: None },
+    /// #         ops: vec![],
+    /// #     },
+    /// # };
+    /// let translator = SubstraitTranslator::new(&schema_provider);
+    /// let plan = translator.translate(&program).expect("Translation failed");
+    /// ```
     pub fn translate(&self, program: &Program) -> Result<Plan, TranslateError> {
         // Translate the main pipeline to a relation
         let root_rel = self.translate_pipeline(&program.pipeline)?;

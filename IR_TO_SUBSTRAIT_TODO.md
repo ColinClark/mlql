@@ -212,32 +212,46 @@ We just built the DuckDB substrait extension to **consume** Substrait plans, not
 
 ## Phase 4: Integration & Testing (Milestone 4)
 
-### 4.1 End-to-End Test with DuckDB
-- [ ] Create integration test module
-- [ ] Load substrait extension in test
-- [ ] Translate MLQL IR → Substrait
-- [ ] Execute with `from_substrait()`
-- [ ] Compare results with expected output
+### 4.1 End-to-End Test with DuckDB ✅
+- [x] Create integration test module (`tests/substrait_operators.rs`)
+- [x] Load substrait extension in test (via DUCKDB_CUSTOM_BUILD=1)
+- [x] Translate MLQL IR → Substrait
+- [x] Execute with `from_substrait()`
+- [x] Compare results with expected output
 
-**Test**: Full pipeline execution through DuckDB
-**Commit**: "test(ir): add end-to-end substrait integration tests"
+**Tests**: ✅ 7 integration tests all passing:
+- test_table_scan - Basic ReadRel
+- test_take_limit - FetchRel (limit)
+- test_plan_generation - Plan structure validation
+- test_combined_pipeline - Filter + Sort + Take
+- test_distinct - AggregateRel deduplication
+- test_groupby - AggregateRel with grouping and sum()
+- test_join - JoinRel with Inner join
 
-### 4.2 Error Handling
-- [ ] Add proper error types
-- [ ] Handle unsupported operators gracefully
-- [ ] Provide helpful error messages
-- [ ] Add validation before translation
+**Commits**:
+- ✅ dd08edf "feat(ir): implement Take operator and integration test suite"
+- ✅ 29de2a1 "feat(ir): implement Distinct operator (AggregateRel)"
+- ✅ 4c40f35 "feat(ir): implement GroupBy operator with ReadRel projection and schema tracking"
+- ✅ f287e96 "feat(ir): implement Join operator with JoinRel translation and schema tracking"
 
-**Test**: Verify error messages for unsupported features
-**Commit**: "feat(ir): improve error handling"
+### 4.2 Error Handling ✅
+- [x] Add proper error types (TranslateError enum)
+- [x] Handle unsupported operators gracefully
+- [x] Provide helpful error messages with context
+- [x] Add validation before translation
 
-### 4.3 Documentation
-- [ ] Document `SubstraitTranslator` API
-- [ ] Add examples to module docs
-- [ ] Document schema provider requirements
-- [ ] Add operator mapping reference
+**Assessment**: Error handling already complete with descriptive error types for schema errors, unsupported operators, and translation errors.
 
-**Commit**: "docs(ir): document substrait translator"
+### 4.3 Documentation ✅
+- [x] Document `SubstraitTranslator` API with examples
+- [x] Add comprehensive module docs to `mod.rs`
+- [x] Document schema provider requirements and custom implementation example
+- [x] Add operator mapping reference table
+- [x] Document function extension system
+- [x] Add schema tracking explanation
+- [x] Include usage examples and test instructions
+
+**Commit**: Pending - "docs(ir): add comprehensive API documentation for Substrait translator"
 
 ## Phase 5: Advanced Features (Future)
 
