@@ -91,6 +91,7 @@ impl<'a> SubstraitTranslator<'a> {
             Operator::Filter { condition } => self.translate_filter(input, condition, schema),
             Operator::Select { projections } => self.translate_select(input, projections, schema),
             Operator::Sort { keys } => self.translate_sort(input, keys, schema),
+            Operator::Take { limit } => self.translate_take(input, *limit),
             _ => Err(TranslateError::UnsupportedOperator(format!("Operator {:?} not yet supported", op))),
         }
     }
@@ -174,6 +175,34 @@ impl<'a> SubstraitTranslator<'a> {
         // Wrap in Rel
         Ok(substrait::proto::Rel {
             rel_type: Some(substrait::proto::rel::RelType::Sort(Box::new(sort_rel))),
+        })
+    }
+
+    fn translate_take(&self, input: substrait::proto::Rel, limit: i64) -> Result<substrait::proto::Rel, TranslateError> {
+        // Create an expression for the limit (count)
+        let limit_expr = substrait::proto::Expression {
+            rex_type: Some(substrait::proto::expression::RexType::Literal(
+                substrait::proto::expression::Literal {
+                    nullable: false,
+                    type_variation_reference: 0,
+                    literal_type: Some(substrait::proto::expression::literal::LiteralType::I64(limit)),
+                }
+            )),
+        };
+
+        // Create FetchRel (Substrait's LIMIT operator)
+        // Use the new count_mode/offset_mode API (count_expr/offset_expr)
+        let fetch_rel = substrait::proto::FetchRel {
+            common: None,
+            input: Some(Box::new(input)),
+            count_mode: Some(substrait::proto::fetch_rel::CountMode::CountExpr(Box::new(limit_expr))),
+            offset_mode: None,  // MLQL Take doesn't support OFFSET, leave as None (defaults to 0)
+            advanced_extension: None,
+        };
+
+        // Wrap in Rel
+        Ok(substrait::proto::Rel {
+            rel_type: Some(substrait::proto::rel::RelType::Fetch(Box::new(fetch_rel))),
         })
     }
 
@@ -817,6 +846,74 @@ mod tests {
         // Debug: serialize to JSON
         let plan_json = serde_json::to_string_pretty(&plan).expect("Failed to serialize to JSON");
         println!("✅ Sort test passed - Generated Substrait Plan:");
+        println!("{}", plan_json);
+        println!("   Plan size: {} bytes", plan_bytes.len());
+    }
+
+    #[test]
+    fn test_take_operator() {
+        use prost::Message;
+
+        // Setup schema provider with users table
+        let mut schema_provider = MockSchemaProvider::new();
+        schema_provider.add_table(TableSchema {
+            name: "users".to_string(),
+            columns: vec![
+                ColumnInfo {
+                    name: "id".to_string(),
+                    data_type: "INTEGER".to_string(),
+                    nullable: false,
+                },
+                ColumnInfo {
+                    name: "name".to_string(),
+                    data_type: "VARCHAR".to_string(),
+                    nullable: true,
+                },
+                ColumnInfo {
+                    name: "age".to_string(),
+                    data_type: "INTEGER".to_string(),
+                    nullable: true,
+                },
+            ],
+        });
+
+        // Create IR Program: from users | take 10
+        let program = Program {
+            pragma: None,
+            lets: vec![],
+            pipeline: Pipeline {
+                source: Source::Table {
+                    name: "users".to_string(),
+                    alias: None,
+                },
+                ops: vec![
+                    Operator::Take {
+                        limit: 10,
+                    },
+                ],
+            },
+        };
+
+        // Translate to Substrait
+        let translator = SubstraitTranslator::new(&schema_provider);
+        let result = translator.translate(&program);
+
+        // Verify it succeeds
+        assert!(result.is_ok(), "Translation failed: {:?}", result.err());
+
+        let plan = result.unwrap();
+
+        // Verify plan structure
+        assert!(plan.version.is_some(), "Plan should have version");
+        assert_eq!(plan.relations.len(), 1, "Plan should have exactly one relation");
+
+        // Serialize to protobuf
+        let plan_bytes = plan.encode_to_vec();
+        assert!(plan_bytes.len() > 0, "Plan should serialize to protobuf");
+
+        // Debug: serialize to JSON
+        let plan_json = serde_json::to_string_pretty(&plan).expect("Failed to serialize to JSON");
+        println!("✅ Take test passed - Generated Substrait Plan:");
         println!("{}", plan_json);
         println!("   Plan size: {} bytes", plan_bytes.len());
     }
