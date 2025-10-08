@@ -23,3 +23,7 @@ rust-mcp-sdk.workspace = true
 rust-mcp-schema.workspace = true
 async-trait.workspace = true
 duckdb.workspace = true
+
+# Substrait execution
+substrait.workspace = true
+prost.workspace = true
