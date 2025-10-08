@@ -7,12 +7,17 @@ members = [
     "crates/mlql-duck",
     "crates/mlql-server",
 ]
+# Exclude duckdb-local - it's a separate workspace with its own Cargo.toml
+exclude = ["crates/duckdb-local"]
 
 [workspace.package]
 version = "0.1.0"
 edition = "2021"
 license = "MIT OR Apache-2.0"
 repository = "https://github.com/yourusername/mlql-rs"
+rust-version = "1.75"
+authors = ["MLQL Contributors"]
+homepage = "https://github.com/yourusername/mlql-rs"
 
 [workspace.dependencies]
 # Parsing

@@ -179,24 +179,15 @@ impl<'a> SubstraitTranslator<'a> {
     }
 
     fn translate_take(&self, input: substrait::proto::Rel, limit: i64) -> Result<substrait::proto::Rel, TranslateError> {
-        // Create an expression for the limit (count)
-        let limit_expr = substrait::proto::Expression {
-            rex_type: Some(substrait::proto::expression::RexType::Literal(
-                substrait::proto::expression::Literal {
-                    nullable: false,
-                    type_variation_reference: 0,
-                    literal_type: Some(substrait::proto::expression::literal::LiteralType::I64(limit)),
-                }
-            )),
-        };
-
         // Create FetchRel (Substrait's LIMIT operator)
-        // Use the new count_mode/offset_mode API (count_expr/offset_expr)
+        // NOTE: We use the DEPRECATED oneof variants because DuckDB v1.3 substrait extension
+        // calls the deprecated .offset() and .count() accessor methods.
+        // See: duckdb-substrait-upgrade/src/from_substrait.cpp:539-540
         let fetch_rel = substrait::proto::FetchRel {
             common: None,
             input: Some(Box::new(input)),
-            count_mode: Some(substrait::proto::fetch_rel::CountMode::CountExpr(Box::new(limit_expr))),
-            offset_mode: None,  // MLQL Take doesn't support OFFSET, leave as None (defaults to 0)
+            offset_mode: Some(substrait::proto::fetch_rel::OffsetMode::Offset(0)),  // Use deprecated variant
+            count_mode: Some(substrait::proto::fetch_rel::CountMode::Count(limit)),  // Use deprecated variant
             advanced_extension: None,
         };
 

@@ -116,13 +116,15 @@ We just built the DuckDB substrait extension to **consume** Substrait plans, not
 
 ### 2.5 Take/Limit Operator ✅
 - [x] Translate `Operator::Take` → `FetchRel`
-- [x] Set limit value using count_expr (new API)
+- [x] Use deprecated oneof variants for DuckDB compatibility
 - [x] Combine with existing plan
-- [x] Add test test_take_operator
+- [x] Add integration test test_take_limit
+- [x] Fix API compatibility issue (use deprecated Offset/Count variants)
 
-**Test**: ✅ `from users | take 10` → FetchRel
-**Commit**: ✅ "feat(ir): implement Take operator (FetchRel)"
-**Note**: Uses new Substrait API with `count_mode: CountExpr(Box<Expression>)` instead of deprecated `count` field
+**Test**: ✅ `from users | take 2` → FetchRel (returns 2 rows correctly)
+**Tests**: ✅ test_table_scan, test_take_limit, test_plan_generation all pass
+**Commit**: Pending - "feat(ir): implement Take operator with DuckDB-compatible deprecated variants"
+**Note**: Uses deprecated `OffsetMode::Offset(i64)` and `CountMode::Count(i64)` oneof variants because DuckDB v1.3 extension calls the deprecated `.offset()` and `.count()` accessor methods. The new `count_mode: CountExpr` API is not yet supported by DuckDB.
 
 ## Phase 3: Advanced Operators (Milestone 3)
 

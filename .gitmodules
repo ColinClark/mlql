@@ -1,0 +1,3 @@
+[submodule "crates/duckdb-local"]
+	path = crates/duckdb-local
+	url = https://github.com/wangfenjin/duckdb-rs.git
