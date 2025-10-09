@@ -7,6 +7,30 @@ use mlql_ir::{Program, Pipeline, Source, Operator};
 use mlql_ir::substrait::{SubstraitTranslator, MockSchemaProvider, TableSchema, ColumnInfo};
 use prost::Message;
 
+/// Load Substrait extension into test connection
+fn load_substrait_extension(conn: &Connection) {
+    // Check if already loaded
+    if let Ok(count) = conn.query_row::<i64, _, _>(
+        "SELECT COUNT(*) FROM duckdb_functions() WHERE function_name = 'from_substrait'",
+        [],
+        |row| row.get(0)
+    ) {
+        if count > 0 {
+            return; // Already loaded
+        }
+    }
+
+    // Try to load from SUBSTRAIT_EXTENSION_PATH
+    if let Ok(path) = std::env::var("SUBSTRAIT_EXTENSION_PATH") {
+        conn.execute_batch(&format!("LOAD '{}'", path))
+            .expect("Failed to load Substrait extension from SUBSTRAIT_EXTENSION_PATH");
+    } else {
+        // Try to install from repository
+        conn.execute_batch("INSTALL substrait; LOAD substrait;")
+            .expect("Failed to load Substrait extension. Set SUBSTRAIT_EXTENSION_PATH environment variable.");
+    }
+}
+
 fn setup_schema_provider() -> MockSchemaProvider {
     let mut schema_provider = MockSchemaProvider::new();
     schema_provider.add_table(TableSchema {
@@ -23,6 +47,7 @@ fn setup_schema_provider() -> MockSchemaProvider {
 #[test]
 fn test_table_scan() {
     let conn = Connection::open_in_memory().unwrap();
+    load_substrait_extension(&conn);
     conn.execute_batch("
         CREATE TABLE users (id INTEGER, name VARCHAR, age INTEGER);
         INSERT INTO users VALUES (1, 'Alice', 30), (2, 'Bob', 25), (3, 'Charlie', 35);

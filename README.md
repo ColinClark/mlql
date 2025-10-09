@@ -6,19 +6,19 @@ Rust implementation of MLQL (Machine Learning Query Language) - a domain-specifi
 
 **Two execution paths available:**
 
-### 1. SQL-based (Default)
-```
-MLQL Text → AST → JSON IR → SQL → DuckDB → Arrow/JSON
-```
-
-### 2. Substrait-based (Production)
+### 1. Substrait-based (Default - Production)
 ```
 MLQL Text → AST → JSON IR → Substrait JSON → DuckDB → Arrow/JSON
 ```
 
+### 2. SQL-based (Fallback)
+```
+MLQL Text → AST → JSON IR → SQL → DuckDB → Arrow/JSON
+```
+
 ### Key Design Decisions
 
-1. **Dual execution modes**: SQL for simplicity, Substrait for portability
+1. **Dual execution modes**: Substrait for portability (default), SQL for fallback
 2. **Canonical JSON IR**: Deterministic, serializable, LLM-friendly, cache-friendly
 3. **DuckDB 1.4.1 with Substrait**: Custom build with statically-linked Substrait extension
 4. **JSON format for Substrait**: Uses `from_substrait_json()` for reliability
@@ -180,8 +180,9 @@ OPENAI_API_KEY=sk-...
 MLQL_SERVER_HOST=127.0.0.1
 MLQL_SERVER_PORT=8080
 
-# Execution mode (sql or substrait)
-MLQL_EXECUTION_MODE=substrait
+# Execution mode (defaults to substrait if not set)
+# Set to "sql" to use SQL-based execution fallback
+# MLQL_EXECUTION_MODE=sql
 
 # Custom DuckDB with Substrait (required for substrait mode)
 DUCKDB_CUSTOM_BUILD=1

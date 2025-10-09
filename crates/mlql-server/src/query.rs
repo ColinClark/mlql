@@ -8,9 +8,9 @@ use std::sync::Arc;
 /// Execution mode for MLQL queries
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum ExecutionMode {
-    /// SQL-based execution (current production path)
+    /// SQL-based execution (fallback path)
     Sql,
-    /// Substrait-based execution (new experimental path)
+    /// Substrait-based execution (production path - default)
     Substrait,
 }
 
@@ -18,16 +18,16 @@ impl ExecutionMode {
     /// Get execution mode from environment variable
     ///
     /// Reads `MLQL_EXECUTION_MODE` env var:
-    /// - "substrait" → ExecutionMode::Substrait
-    /// - anything else → ExecutionMode::Sql (default)
+    /// - "sql" → ExecutionMode::Sql (fallback mode)
+    /// - anything else → ExecutionMode::Substrait (default)
     pub fn from_env() -> Self {
         match std::env::var("MLQL_EXECUTION_MODE")
-            .unwrap_or_else(|_| "sql".to_string())
+            .unwrap_or_else(|_| "substrait".to_string())
             .to_lowercase()
             .as_str()
         {
-            "substrait" => ExecutionMode::Substrait,
-            _ => ExecutionMode::Sql,
+            "sql" => ExecutionMode::Sql,
+            _ => ExecutionMode::Substrait,
         }
     }
 }
@@ -35,8 +35,8 @@ impl ExecutionMode {
 /// Execute MLQL IR with automatic mode selection based on environment
 ///
 /// Uses `MLQL_EXECUTION_MODE` environment variable to choose execution path:
-/// - "substrait" → Substrait-based execution
-/// - anything else → SQL-based execution (default)
+/// - "sql" → SQL-based execution (fallback mode)
+/// - anything else → Substrait-based execution (default)
 pub async fn execute_ir_auto(
     pipeline: Pipeline,
     database: Option<String>,
