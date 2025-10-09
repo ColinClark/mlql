@@ -4,58 +4,103 @@ Rust implementation of MLQL (Machine Learning Query Language) - a domain-specifi
 
 ## Architecture
 
-**MLQL → SQL → DuckDB** (Clean and simple)
+**Two execution paths available:**
 
+### 1. SQL-based (Default)
 ```
 MLQL Text → AST → JSON IR → SQL → DuckDB → Arrow/JSON
 ```
 
+### 2. Substrait-based (Production)
+```
+MLQL Text → AST → JSON IR → Substrait JSON → DuckDB → Arrow/JSON
+```
+
 ### Key Design Decisions
 
-1. **Direct SQL compilation**: We compile MLQL IR to SQL for execution
-2. **DuckDB native**: Direct SQL execution - no extension dependencies
-3. **Canonical JSON IR**: Deterministic, serializable, cache-friendly
-4. **SQL injection safe**: Parameterized values, no string interpolation
+1. **Dual execution modes**: SQL for simplicity, Substrait for portability
+2. **Canonical JSON IR**: Deterministic, serializable, LLM-friendly, cache-friendly
+3. **DuckDB 1.4.1 with Substrait**: Custom build with statically-linked Substrait extension
+4. **JSON format for Substrait**: Uses `from_substrait_json()` for reliability
+5. **SQL injection safe**: Parameterized values, no string interpolation
 
 ## Workspace Structure
 
 Multi-crate workspace:
 
 - **mlql-ast**: MLQL grammar parser (Pest)
-- **mlql-ir**: Canonical JSON IR with deterministic serialization
+- **mlql-ir**: Canonical JSON IR + Substrait translator
 - **mlql-registry**: Function registry and policy definitions
-- **mlql-substrait**: IR → Substrait encoder (for future compatibility)
 - **mlql-duck**: DuckDB executor with IR-to-SQL translator
-- **mlql-server**: HTTP API (Axum)
+- **mlql-server**: MCP server (HTTP + SSE) with OpenAI integration
 
 ## Features
 
-- **Pipeline syntax**: Unix-like pipes for data transformation
-- **ML primitives**: Vector search (KNN), graph traversal, time-series
-- **Resource governance**: Memory/time budgets, query interrupts
-- **Policy enforcement**: PII masking, row-level security
-- **Deterministic caching**: SHA-256 plan fingerprinting
-- **Arrow-native**: Streaming results via Arrow IPC
+- ✅ **Pipeline syntax**: Unix-like pipes for data transformation
+- ✅ **Substrait execution**: Portable query plans via JSON format
+- ✅ **LLM integration**: Natural language → MLQL IR via OpenAI
+- ✅ **MCP protocol**: Model Context Protocol server for Claude Desktop
+- ✅ **Dual execution**: SQL and Substrait paths both working
+- ✅ **Schema discovery**: Runtime catalog introspection
+- ✅ **Arrow-native**: Streaming results via Arrow IPC
 
 ## Quick Start
 
+### Build the project
 ```bash
 # Build workspace
 cargo build
 
-# Run tests
+# Run all tests (28 passing)
 cargo test
 
-# Build server
-cargo build -p mlql-server
-
-# Run example
-cargo run --example run_pipeline
+# Run Substrait integration tests (8 passing)
+env DUCKDB_CUSTOM_BUILD=1 cargo test -p mlql-ir --test substrait_operators
 ```
+
+### Run the MCP Server
+
+```bash
+# Using the helper script (recommended)
+./run_server.sh
+
+# Or manually with custom DuckDB
+env DUCKDB_CUSTOM_BUILD=1 \
+  DYLD_LIBRARY_PATH=/Users/colin/Dev/truepop/mlql/duckdb-substrait-upgrade/build/release/src:$DYLD_LIBRARY_PATH \
+  cargo run -p mlql-server
+```
+
+Server will start on `http://127.0.0.1:8080` with:
+- MCP endpoint: `/mcp` (Streamable HTTP)
+- SSE endpoint: `/sse` (Server-Sent Events)
+
+### Configure Claude Desktop
+
+Add to `~/Library/Application Support/Claude/claude_desktop_config.json`:
+
+```json
+{
+  "mcpServers": {
+    "mlql": {
+      "command": "npx",
+      "args": ["mcp-remote", "http://127.0.0.1:8080/mcp"]
+    }
+  }
+}
+```
+
+See `docs/claude-desktop-setup.md` for details.
 
 ## Example Queries
 
-### Basic Pipeline
+### Natural Language (via MCP)
+```
+"Show me the top 10 largest bank failures by assets"
+"Count bank failures by state and show total assets"
+"Show total failures, total assets, average assets, and largest failure"
+```
+
+### MLQL Syntax
 ```mlql
 from sales s
 | filter s.region == "EU"
@@ -64,24 +109,34 @@ from sales s
 | take 10
 ```
 
-### Vector Search
-```mlql
-from documents
-| knn q: <0.1, 0.2, 0.3> k: 10 index: "embedding_idx" metric: "cosine"
-| select [doc_id, title, similarity]
+### JSON IR (for LLMs)
+```json
+{
+  "pipeline": {
+    "source": {"type": "Table", "name": "bank_failures"},
+    "ops": [
+      {
+        "op": "GroupBy",
+        "keys": [{"column": "State"}],
+        "aggs": {
+          "total": {"func": "count"}
+        }
+      },
+      {
+        "op": "Sort",
+        "keys": [{"expr": {"type": "Column", "col": {"column": "total"}}, "desc": true}]
+      },
+      {"op": "Take", "limit": 10}
+    ]
+  }
+}
 ```
 
-### With Policies
-```mlql
-pragma { timeout: 30000, max_memory: "1GB" }
+See `docs/llm-json-format.md` for complete JSON IR specification.
 
-from customers c
-| join from orders o on c.id == o.customer_id
-| select [mask(c.email) as email, o.total]
-| filter o.total > 100
-```
+## Operator Support
 
-## SQL Operator Mapping
+### SQL-based Execution (28 tests ✅)
 
 | MLQL Operator | SQL Translation        | Status |
 |---------------|------------------------|--------|
@@ -89,13 +144,84 @@ from customers c
 | `filter`      | `WHERE`                | ✅     |
 | `sort`        | `ORDER BY`             | ✅     |
 | `take`        | `LIMIT`                | ✅     |
-| `join`        | `JOIN ... ON`          | 🚧     |
-| `group`       | `GROUP BY ... HAVING`  | 🚧     |
-| `distinct`    | `DISTINCT`             | 🚧     |
-| `knn`         | DuckDB vector search   | 📋     |
-| `resample`    | Window + aggregate     | 📋     |
+| `join`        | `JOIN ... ON`          | ✅     |
+| `group`       | `GROUP BY`             | ✅     |
+| `distinct`    | `SELECT DISTINCT`      | ✅     |
+
+**Aggregates**: count, sum, avg, min, max
+**Joins**: INNER, LEFT, RIGHT, FULL, CROSS
+
+### Substrait-based Execution (8 tests ✅)
+
+| MLQL Operator | Substrait Relation | Status |
+|---------------|-------------------|--------|
+| `from`        | `ReadRel`         | ✅     |
+| `filter`      | `FilterRel`       | ✅     |
+| `select`      | `ProjectRel`      | ✅     |
+| `sort`        | `SortRel`         | ✅     |
+| `take`        | `FetchRel`        | ✅     |
+| `group`       | `AggregateRel`    | ✅     |
+| `join`        | `JoinRel`         | ✅     |
+| `distinct`    | `AggregateRel`    | ✅     |
+
+**Format**: JSON (via `from_substrait_json()`)
+**Aggregates**: count, sum, avg, min, max
+**Schema tracking**: Automatic through pipeline
+
+## Environment Configuration
+
+Create `.env` file:
+
+```env
+# OpenAI API (for natural language queries)
+OPENAI_API_KEY=sk-...
+
+# Server configuration
+MLQL_SERVER_HOST=127.0.0.1
+MLQL_SERVER_PORT=8080
+
+# Execution mode (sql or substrait)
+MLQL_EXECUTION_MODE=substrait
+
+# Custom DuckDB with Substrait (required for substrait mode)
+DUCKDB_CUSTOM_BUILD=1
+SUBSTRAIT_EXTENSION_PATH=/Users/colin/Dev/truepop/mlql/duckdb-substrait-upgrade/build/release/extension/substrait/substrait.duckdb_extension
+```
+
+## Custom DuckDB Build
+
+The Substrait execution requires DuckDB 1.4.1 with statically-linked Substrait extension:
+
+```bash
+cd /Users/colin/Dev/truepop/mlql/duckdb-substrait-upgrade
+
+# Build statically-linked DuckDB with Substrait
+EXTENSION_STATIC_BUILD=1 make release
+
+# Artifacts:
+# - build/release/duckdb (CLI binary)
+# - build/release/src/libduckdb.dylib (library for Rust)
+```
+
+The `.cargo/config.toml` configures Rust to link against this custom library when `DUCKDB_CUSTOM_BUILD=1` is set.
 
 ## Development
+
+### Running Tests
+
+```bash
+# All tests
+cargo test
+
+# Specific crate
+cargo test -p mlql-duck
+cargo test -p mlql-ir
+
+# Substrait tests (requires custom DuckDB)
+env DUCKDB_CUSTOM_BUILD=1 cargo test -p mlql-ir --test substrait_operators -- --show-output
+```
+
+### Code Quality
 
 ```bash
 # Format
@@ -104,65 +230,100 @@ cargo fmt
 # Lint
 cargo clippy --all-targets --all-features
 
-# Test specific crate
-cargo test -p mlql-substrait
-
-# Benchmark
-cargo bench
+# Auto-fix
+cargo clippy --fix --all-targets --all-features
 ```
 
-## HTTP API
+### Commit Messages
 
-```bash
-# Start server
-cargo run -p mlql-server
+Follow conventional commits:
+- `feat(duck): implement JOIN operator`
+- `fix(ir): schema tracking in GroupBy`
+- `docs: update README with Substrait execution`
+- `test(substrait): add GroupBy integration test`
 
-# Execute query
-curl -X POST http://localhost:3000/v1/execute \
-  -H "Content-Type: application/json" \
-  -d '{"query": "from users | filter is_active == true | take 10"}'
-```
+## Key Files
 
-## Roadmap
+### Core Implementation
+- `crates/mlql-ast/src/parser.rs` - Pest grammar for MLQL text
+- `crates/mlql-ir/src/types.rs` - IR type definitions
+- `crates/mlql-ir/src/substrait/translator.rs` - IR → Substrait translator
+- `crates/mlql-duck/src/lib.rs` - IR → SQL translator
 
-- **v0.1**: Core operators, Arrow/JSON results, masking
-- **v0.2**: Window functions, set operations
-- **v0.3**: KNN, resample, caching
-- **v0.4**: Streaming, provenance tracking
+### Server
+- `crates/mlql-server/src/main.rs` - HTTP server and routing
+- `crates/mlql-server/src/mcp.rs` - MCP protocol implementation
+- `crates/mlql-server/src/llm.rs` - OpenAI integration (NL → IR)
+- `crates/mlql-server/src/query.rs` - Query execution (SQL + Substrait)
+- `crates/mlql-server/src/catalog.rs` - DuckDB schema provider
 
-## Current Status
+### Documentation
+- `docs/llm-json-format.md` - JSON IR format for LLMs
+- `docs/claude-desktop-setup.md` - Claude Desktop MCP setup
+- `CLAUDE.md` - Development session notes
+- `README.md` - This file
 
-**✅ Working:**
-- MLQL parser with Pest grammar
-- AST → IR conversion
-- IR → SQL translation for: select, filter, sort, take
-- Wildcard (*) support
-- End-to-end test: `from users | select [*]`
+## Architecture Deep Dive
 
-**🚧 In Progress:**
-- Additional operators (join, groupby, distinct)
-- Expression types (comparison, functions, aggregates)
+### Substrait Execution Flow
 
-**📋 Planned:**
-- HTTP server API
-- Policy enforcement (budgets, masking)
-- Vector search (KNN)
-- Streaming results
+1. **Natural Language** → OpenAI GPT-4o-mini → **MLQL JSON IR**
+2. **JSON IR** → SubstraitTranslator → **Substrait Plan** (JSON format)
+3. **Substrait JSON** → DuckDB `from_substrait_json()` → **Results**
+
+### Schema Tracking
+
+The translator maintains schema context through the pipeline:
+- After `GroupBy`: `[grouping_keys..., aggregate_aliases...]`
+- After `Select`: `[projected_column_names...]`
+- After `Join`: `[left_columns..., right_columns...]`
+- Other operators preserve schema
+
+This enables correct field resolution in subsequent operators (e.g., sorting by aggregate columns).
+
+### Why JSON Format?
+
+- **Reliability**: Binary protobuf format had hanging issues on macOS
+- **Debugging**: Human-readable plans for troubleshooting
+- **Compatibility**: Works with DuckDB's `from_substrait_json()`
+- **Validation**: Easier to inspect and validate plans
+
+## Troubleshooting
+
+### Server won't start
+
+- Check `DUCKDB_CUSTOM_BUILD=1` is set
+- Verify `DYLD_LIBRARY_PATH` points to custom DuckDB library
+- Check OpenAI API key is in `.env` file (not shell env)
+
+### Queries hang
+
+- Ensure using JSON format (`from_substrait_json()`)
+- Check DuckDB version matches (1.4.1)
+- Verify Substrait extension is statically linked
+
+### Schema errors
+
+- Check schema tracking in translator.rs:350-395
+- Verify `current_schema` updates after each operator
+- Test with simpler single-operator queries first
+
+## Contributing
+
+1. Write tests first (TDD)
+2. Run tests after each change
+3. Update documentation
+4. Follow commit message conventions
+5. Keep CLAUDE.md updated with learnings
 
 ## References
 
-- [EBNF Grammar](../docs/EBNF.md)
+- [Substrait Specification](https://substrait.io/)
 - [DuckDB Documentation](https://duckdb.org/docs/)
+- [DuckDB Substrait Extension](https://duckdb.org/docs/extensions/substrait)
+- [Model Context Protocol](https://modelcontextprotocol.io/)
+- [OpenAI API](https://platform.openai.com/docs/api-reference)
 
 ## License
 
-**Creative Commons Attribution-NonCommercial 4.0 International (CC BY-NC 4.0)**
-
-This work is licensed under a Creative Commons Attribution-NonCommercial 4.0 International License.
-
-- ✅ **Free for non-commercial use** - Research, education, personal projects
-- ❌ **Commercial use requires a license** - Contact for licensing inquiries
-- 📧 **Commercial licensing**: Contact repository owner
-
-For the full license text, see [LICENSE](LICENSE) or visit:
-https://creativecommons.org/licenses/by-nc/4.0/
+[Your License Here]

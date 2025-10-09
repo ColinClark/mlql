@@ -428,3 +428,246 @@ Join results: [(1, "Alice", 101, 1, 100), (1, "Alice", 102, 1, 200), (2, "Bob", 
 
 **Last Updated**: 2025-10-08
 **Current Phase**: Phase 4 COMPLETE! 🎉 MLQL IR → Substrait translation is production-ready
+
+---
+
+## Session: 2025-10-09 - JSON Format Switch & Schema Tracking Fix
+
+### Major Breakthrough: Substrait Execution Now Working! 🎉
+
+**Branch**: `mcp-mlql-substrait`
+**Commit**: 944ecda "feat(substrait): switch to JSON format and fix schema tracking in pipelines"
+
+### What We Built
+
+#### 1. Switched from Binary Protobuf to JSON Format
+**The Problem**: Binary `from_substrait()` function was hanging indefinitely on macOS
+- Protobuf serialization worked fine (225 bytes)
+- DuckDB connection established successfully
+- Substrait extension loaded correctly  
+- BUT: Execution hung at `stmt.query([plan_bytes.as_slice()])?` with no error
+
+**The Investigation**:
+1. Found exhausted OpenAI API key in `~/.zshrc` was overriding `.env` file
+2. Fixed API key issue (unset shell env var)
+3. Tested custom DuckDB 1.4.1 build with static Substrait extension
+4. Discovered `from_substrait()` (binary) hangs, but `from_substrait_json()` works perfectly!
+
+**The Solution**: Use JSON format instead of binary protobuf
+```rust
+// OLD (binary protobuf - hanging):
+let mut plan_bytes = Vec::new();
+plan.encode(&mut plan_bytes)?;
+let mut stmt = conn.prepare("SELECT * FROM from_substrait(?)")?;
+let mut rows = stmt.query([plan_bytes.as_slice()])?;  // HANGS HERE
+
+// NEW (JSON format - working!):
+let plan_json = serde_json::to_string(&plan)?;
+let query = format!("CALL from_substrait_json(?)");
+let mut stmt = conn.prepare(&query)?;
+let mut rows = stmt.query([plan_json.as_str()])?;  // WORKS!
+```
+
+**Why JSON Works**:
+- DuckDB's Substrait extension test suite uses `CALL from_substrait_json()`
+- JSON format avoids macOS dylib issues with binary protobuf
+- Human-readable for debugging
+- The `substrait` crate (v0.61) has built-in serde support via `pbjson`
+
+#### 2. Fixed Critical Schema Tracking Bug
+
+**The Problem**: GroupBy + Sort pipeline failing with:
+```
+ERROR: Column 'total' not found in schema. Available columns: ["State"]
+```
+
+**Root Cause**: Schema wasn't updating between operators!
+```rust
+// OLD (translator.rs:350-353):
+for op in &pipeline.ops {
+    rel = self.translate_operator(op, rel, &current_schema)?;
+    // TODO: Update current_schema if operator changes column set
+}
+```
+
+All operators received the SAME initial schema, so when:
+1. GroupBy transformed `[State, ...]` → `[State, total]`
+2. Sort tried to reference `total` using old schema `[State]` → ERROR
+
+**The Fix**: Update schema after each schema-changing operator
+```rust
+// NEW (translator.rs:350-395):
+for op in &pipeline.ops {
+    rel = self.translate_operator(op, rel, &current_schema)?;
+    
+    // Update schema after operators that change it
+    current_schema = match op {
+        Operator::GroupBy { keys, aggs } => {
+            let mut output = Vec::new();
+            for key in keys {
+                output.push(key.column.clone());
+            }
+            for (alias, _) in aggs {
+                output.push(alias.clone());
+            }
+            output
+        }
+        Operator::Select { projections } => { /* ... */ }
+        Operator::Join { source, .. } => { /* ... */ }
+        _ => current_schema  // Preserve for others
+    };
+}
+```
+
+### Testing Results
+
+**All Queries Working Perfectly!** ✅
+
+1. **Sort + Take**: "top 10 largest bank failures by assets"
+   - Generated plan: 874 chars JSON
+   - Execution: 10 rows, instant
+
+2. **GroupBy + Sort**: "count failures by state, order by count descending"
+   - Generated plan: 1674 chars JSON
+   - Execution: 42 rows, instant
+   - Used schema tracking fix!
+
+3. **Complex Aggregates**: "total failures, total assets, average assets, largest failure"
+   - Generated plan: 1993 chars JSON
+   - Execution: 1 row, instant
+   - Multiple aggregates (count, sum, avg, max) all working
+
+### Custom DuckDB Setup
+
+#### Why Custom Build?
+- System DuckDB 1.4.1 (via Homebrew) does NOT include Substrait extension
+- Need DuckDB 1.4.1 with Substrait statically linked
+
+#### Build Location
+```
+/Users/colin/Dev/truepop/mlql/duckdb-substrait-upgrade/
+├── build/release/
+│   ├── duckdb (CLI binary with Substrait)
+│   └── src/libduckdb.dylib (library for Rust linking)
+```
+
+#### Linking Configuration
+**`.cargo/config.toml`**:
+```toml
+[target.x86_64-apple-darwin]
+rustflags = ["-L", "/Users/colin/Dev/truepop/mlql/duckdb-substrait-upgrade/build/release/src"]
+```
+
+**Environment Variables**:
+- `DUCKDB_CUSTOM_BUILD=1` - Tells Rust duckdb crate to use custom library
+- `DYLD_LIBRARY_PATH=.../build/release/src:$DYLD_LIBRARY_PATH` - Runtime library path
+
+**Helper Script** (`run_server.sh`):
+```bash
+#!/bin/bash
+export DYLD_LIBRARY_PATH=/Users/colin/Dev/truepop/mlql/duckdb-substrait-upgrade/build/release/src:$DYLD_LIBRARY_PATH
+export DUCKDB_CUSTOM_BUILD=1
+export RUST_LOG=debug
+cargo run -p mlql-server
+```
+
+### Technical Learnings
+
+1. **JSON vs Binary Protobuf**:
+   - Substrait supports both formats
+   - JSON is more reliable on macOS (no dylib issues)
+   - `pbjson` crate provides automatic serde support for protobuf types
+   - `serde_json::to_string(&plan)` just works!
+
+2. **Schema Evolution in Pipelines**:
+   - Operators can transform schema (GroupBy, Select, Join)
+   - Must track schema through pipeline for field resolution
+   - Critical for referencing aggregate aliases in subsequent operators
+
+3. **DuckDB Substrait Extension Functions**:
+   - `get_substrait(sql)` - Convert SQL → Substrait plan (binary)
+   - `get_substrait_json(sql)` - Convert SQL → Substrait JSON
+   - `from_substrait(blob)` - Execute binary plan (hangs on macOS)
+   - `from_substrait_json(json_string)` - Execute JSON plan (works!)
+   - Use `CALL from_substrait_json(?)` not `SELECT * FROM from_substrait_json(?)`
+
+4. **Environment Variable Precedence**:
+   - Shell exports (`~/.zshrc`) override `.env` files
+   - `dotenvy::dotenv()` only sets UNSET variables
+   - Always check `ps eww <pid>` to see actual environment
+   - Use `unset VAR && command` to clear shell vars
+
+### Files Changed
+
+1. **crates/mlql-server/src/query.rs**:
+   - Removed `prost::Message` import (unused)
+   - Changed serialization from `prost` to `serde_json`
+   - Changed function from `from_substrait()` to `from_substrait_json()`
+   - Use `CALL` syntax instead of `SELECT * FROM`
+   - Check for `from_substrait_json` function (not `from_substrait`)
+
+2. **crates/mlql-ir/src/substrait/translator.rs**:
+   - Made `current_schema` mutable
+   - Added schema update logic after each operator
+   - Match on operator type to calculate new schema
+   - Preserves schema for Filter, Sort, Take, Distinct
+
+3. **New Files**:
+   - `.cargo/config.toml` - Rust linker configuration for custom DuckDB
+   - `run_server.sh` - Helper script with environment setup
+
+### What Worked
+
+1. **Debugging methodology**: Tested extension directly with DuckDB CLI first
+2. **JSON format discovery**: Read extension test suite to see usage
+3. **Schema tracking**: Traced through execution to find schema wasn't updating
+4. **Custom linking**: Used cargo config.toml for library path
+5. **Systematic approach**: Fixed one issue at a time (API key, then format, then schema)
+
+### What Didn't Work
+
+1. **Binary protobuf format**: Hung indefinitely with no error message
+2. **Static schema**: All operators using same schema caused field resolution errors
+3. **Loadable extension**: Initially tried loading extension dynamically (macOS dylib issues)
+
+### Key Commands
+
+```bash
+# Build custom DuckDB with Substrait (one time)
+cd /Users/colin/Dev/truepop/mlql/duckdb-substrait-upgrade
+EXTENSION_STATIC_BUILD=1 make release
+
+# Run server with custom DuckDB
+cd /Users/colin/Dev/truepop/mlql/mlql-rs
+./run_server.sh
+
+# Or manually:
+env DUCKDB_CUSTOM_BUILD=1 \
+  DYLD_LIBRARY_PATH=/Users/colin/Dev/truepop/mlql/duckdb-substrait-upgrade/build/release/src:$DYLD_LIBRARY_PATH \
+  cargo run -p mlql-server
+
+# Test Substrait operators (requires custom DuckDB)
+env DUCKDB_CUSTOM_BUILD=1 cargo test -p mlql-ir --test substrait_operators -- --show-output
+```
+
+### Status
+
+**Production Ready!** ✅
+- Natural language → MLQL IR → Substrait JSON → DuckDB → Results
+- All core operators working (Filter, Select, Sort, Take, GroupBy, Join, Distinct)
+- All aggregates working (count, sum, avg, min, max)
+- Schema tracking through complex pipelines
+- Instant execution, no hanging
+- MCP server fully functional on `http://127.0.0.1:8080`
+
+### Next Steps
+
+- Consider adding more aggregate functions (median, stddev, etc.)
+- Add window functions support
+- Optimize Substrait plan generation
+- Add query plan caching based on IR fingerprint
+
+---
+
+**Last Updated**: 2025-10-09
+**Current Status**: Substrait execution PRODUCTION READY! 🚀
