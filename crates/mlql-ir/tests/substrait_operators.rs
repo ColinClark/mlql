@@ -448,6 +448,59 @@ fn test_join() {
 }
 
 #[test]
+#[ignore] // Only run with --ignored since it requires data/demo.duckdb
+fn test_file_based_database() {
+    // Test that Substrait queries work with file-based databases (not just in-memory)
+    use std::path::PathBuf;
+    let db_path = PathBuf::from(env!("CARGO_MANIFEST_DIR"))
+        .parent().unwrap()
+        .parent().unwrap()
+        .join("data/demo.duckdb");
+    let conn = Connection::open(&db_path).expect(&format!("Failed to open {:?}", db_path));
+
+    // Check if from_substrait_json is available
+    let count: i64 = conn.query_row(
+        "SELECT COUNT(*) FROM duckdb_functions() WHERE function_name = 'from_substrait_json'",
+        [],
+        |row| row.get(0)
+    ).expect("Failed to check for from_substrait_json");
+
+    if count == 0 {
+        panic!("from_substrait_json function not found! Make sure Substrait extension is loaded.");
+    }
+
+    println!("✅ from_substrait_json function found");
+
+    // Test 1: Simple table scan
+    println!("\nTest 1: Simple table scan");
+    let simple_plan = r#"{"version":{"minorNumber":53,"producer":"DuckDB"},"relations":[{"root":{"input":{"read":{"baseSchema":{"names":["Bank Name"],"struct":{"types":[{"string":{"nullability":"NULLABILITY_NULLABLE"}}],"nullability":"NULLABILITY_REQUIRED"}},"namedTable":{"names":["bank_failures"]}}},"names":["Bank Name"]}}]}"#;
+
+    let mut stmt = conn.prepare("CALL from_substrait_json(?)").expect("Failed to prepare");
+    let mut rows = stmt.query([simple_plan]).expect("Failed to execute simple scan");
+
+    let mut count = 0;
+    while let Some(_row) = rows.next().expect("Failed to read row") {
+        count += 1;
+    }
+    println!("✅ Simple scan: {} rows", count);
+    assert!(count > 0, "Expected rows from bank_failures table");
+
+    // Test 2: Sort query (this is where the server hangs)
+    println!("\nTest 2: Sort query");
+    let sort_plan = r#"{"version":{"minorNumber":53,"producer":"DuckDB"},"relations":[{"root":{"input":{"sort":{"input":{"read":{"baseSchema":{"names":["Assets ($mil.)"],"struct":{"types":[{"fp64":{"nullability":"NULLABILITY_NULLABLE"}}],"nullability":"NULLABILITY_REQUIRED"}},"namedTable":{"names":["bank_failures"]}}},"sorts":[{"expr":{"selection":{"directReference":{"structField":{"field":0}},"rootReference":{}}},"direction":"SORT_DIRECTION_DESC_NULLS_LAST"}]}},"names":["Assets ($mil.)"]}}]}"#;
+
+    let mut stmt2 = conn.prepare("CALL from_substrait_json(?)").expect("Failed to prepare");
+    let mut rows2 = stmt2.query([sort_plan]).expect("Failed to execute sort query");
+
+    let mut count2 = 0;
+    while let Some(_row) = rows2.next().expect("Failed to read row") {
+        count2 += 1;
+    }
+    println!("✅ Sort query: {} rows", count2);
+    assert!(count2 > 0, "Expected rows from sorted bank_failures table");
+}
+
+#[test]
 fn test_all_aggregates() {
     use mlql_ir::{AggCall, Expr, ColumnRef};
     use std::collections::HashMap;
