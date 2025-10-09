@@ -201,6 +201,7 @@ impl<'a> SubstraitTranslator<'a> {
         // Generate extension URIs and function extensions
         let (extension_uris, extensions) = self.generate_extensions();
 
+        #[allow(deprecated)]
         let plan = Plan {
             version: Some(substrait::proto::Version {
                 minor_number: 53,
@@ -217,6 +218,7 @@ impl<'a> SubstraitTranslator<'a> {
     }
 
     /// Generate extension URIs and extensions based on registered functions
+    #[allow(deprecated)]
     fn generate_extensions(&self) -> (Vec<substrait::proto::extensions::SimpleExtensionUri>, Vec<substrait::proto::extensions::SimpleExtensionDeclaration>) {
         let registry = self.function_registry.borrow();
         let functions = registry.get_functions();
@@ -337,7 +339,7 @@ impl<'a> SubstraitTranslator<'a> {
         let mut rel = self.translate_source_with_projection(&pipeline.source, projection_fields.as_ref())?;
 
         // Get the schema context from the source
-        let current_schema = if let Some(ref fields) = projection_fields {
+        let mut current_schema = if let Some(ref fields) = projection_fields {
             // If projection is applied, schema is the projected columns
             let full_schema = self.get_output_names(&pipeline.source)?;
             fields.iter().map(|&idx| full_schema[idx].clone()).collect()
@@ -345,10 +347,51 @@ impl<'a> SubstraitTranslator<'a> {
             self.get_output_names(&pipeline.source)?
         };
 
-        // Apply operators on top of the source relation
+        // Apply operators on top of the source relation, updating schema as we go
         for op in &pipeline.ops {
             rel = self.translate_operator(op, rel, &current_schema)?;
-            // TODO: Update current_schema if operator changes column set (e.g., Select)
+
+            // Update schema after operators that change it
+            current_schema = match op {
+                Operator::Select { projections } => {
+                    // Select changes the schema to the projected columns
+                    let mut result = Vec::new();
+                    for (idx, proj) in projections.iter().enumerate() {
+                        match proj {
+                            Projection::Expr(Expr::Column { col }) => {
+                                result.push(col.column.clone());
+                            }
+                            Projection::Aliased { alias, .. } => {
+                                result.push(alias.clone());
+                            }
+                            Projection::Expr(_) => {
+                                result.push(format!("expr_{}", idx));
+                            }
+                        }
+                    }
+                    result
+                }
+                Operator::GroupBy { keys, aggs } => {
+                    // GroupBy output: grouping keys + aggregate aliases
+                    let mut output = Vec::new();
+                    for key in keys {
+                        output.push(key.column.clone());
+                    }
+                    for (alias, _) in aggs {
+                        output.push(alias.clone());
+                    }
+                    output
+                }
+                Operator::Join { source, .. } => {
+                    // Join output: [left_columns..., right_columns...]
+                    let right_schema = self.get_output_names(source)?;
+                    let mut output = current_schema.clone();
+                    output.extend(right_schema);
+                    output
+                }
+                // Most operators preserve the schema
+                _ => current_schema
+            };
         }
 
         Ok(rel)
@@ -831,6 +874,8 @@ impl<'a> SubstraitTranslator<'a> {
         })
     }
 
+    // NOTE: Currently unused - kept for potential future use with non-root aggregate translation
+    #[allow(dead_code)]
     fn translate_aggregate(&self, agg_call: &AggCall, schema: &[String], _name: &str) -> Result<substrait::proto::aggregate_rel::Measure, TranslateError> {
         // Translate aggregate function arguments
         let arguments: Result<Vec<_>, _> = agg_call.args.iter().map(|expr| {
@@ -966,6 +1011,7 @@ impl<'a> SubstraitTranslator<'a> {
         })
     }
 
+    #[allow(deprecated)]
     fn translate_binary_op(&self, op: &BinOp, left: &Expr, right: &Expr, schema: &[String]) -> Result<substrait::proto::Expression, TranslateError> {
         let left_expr = Box::new(self.translate_expr(left, schema)?);
         let right_expr = Box::new(self.translate_expr(right, schema)?);
@@ -1017,6 +1063,7 @@ impl<'a> SubstraitTranslator<'a> {
         })
     }
 
+    #[allow(deprecated)]
     fn translate_unary_op(&self, op: &UnOp, expr: &Expr, schema: &[String]) -> Result<substrait::proto::Expression, TranslateError> {
         let inner_expr = Box::new(self.translate_expr(expr, schema)?);
 
@@ -1052,6 +1099,8 @@ impl<'a> SubstraitTranslator<'a> {
         })
     }
 
+    // NOTE: Currently unused - kept for potential future use with nested source translation
+    #[allow(dead_code)]
     fn translate_source(&self, source: &Source) -> Result<substrait::proto::Rel, TranslateError> {
         match source {
             Source::Table { name, alias: _ } => {

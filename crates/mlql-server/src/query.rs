@@ -86,26 +86,34 @@ pub async fn execute_ir_substrait(
 ) -> Result<(String, serde_json::Value), Box<dyn std::error::Error>> {
     use mlql_ir::substrait::SubstraitTranslator;
     use crate::catalog::DuckDbSchemaProvider;
-    use prost::Message;
+
+    tracing::debug!("Starting Substrait execution");
 
     // 1. Open DuckDB connection
+    tracing::debug!("Opening DuckDB connection: {:?}", database);
     let conn = if let Some(db_path) = database {
         duckdb::Connection::open(db_path)?
     } else {
         duckdb::Connection::open_in_memory()?
     };
     let conn = Arc::new(conn);
+    tracing::debug!("DuckDB connection established");
 
     // 2. Load Substrait extension
+    tracing::debug!("Loading Substrait extension");
     load_substrait_extension(&conn)?;
+    tracing::debug!("Substrait extension ready");
 
     // 3. Create schema provider
+    tracing::debug!("Creating schema provider");
     let schema_provider = DuckDbSchemaProvider::new(conn.clone());
 
     // 4. Initialize translator
+    tracing::debug!("Initializing Substrait translator");
     let translator = SubstraitTranslator::new(&schema_provider);
 
     // 5. Convert Pipeline to Program
+    tracing::debug!("Converting pipeline to program");
     let program = Program {
         pragma: None,
         lets: vec![],
@@ -113,28 +121,55 @@ pub async fn execute_ir_substrait(
     };
 
     // 6. Translate to Substrait
+    tracing::debug!("Translating to Substrait plan");
     let plan = translator.translate(&program)
-        .map_err(|e| format!("Substrait translation failed: {}", e))?;
+        .map_err(|e| {
+            tracing::error!("Substrait translation failed: {}", e);
+            format!("Substrait translation failed: {}", e)
+        })?;
+    tracing::debug!("Substrait plan generated successfully");
 
-    // 7. Serialize to protobuf
-    let mut plan_bytes = Vec::new();
-    plan.encode(&mut plan_bytes)
-        .map_err(|e| format!("Protobuf encoding failed: {}", e))?;
+    // 7. Serialize to JSON (using prost-reflect for protobuf → JSON)
+    tracing::debug!("Serializing plan to JSON");
+    let plan_json = serde_json::to_string(&plan)
+        .map_err(|e| {
+            tracing::error!("JSON serialization failed: {}", e);
+            format!("JSON serialization failed: {}", e)
+        })?;
+    tracing::debug!("Plan serialized: {} chars", plan_json.len());
 
-    // 8. Execute via from_substrait()
-    let mut stmt = conn.prepare("SELECT * FROM from_substrait(?)")?;
-    let mut rows = stmt.query([plan_bytes.as_slice()])?;
+    // 8. Execute via from_substrait_json() using CALL syntax
+    tracing::debug!("Preparing from_substrait_json CALL");
+    let query = format!("CALL from_substrait_json(?)"  );
+    let mut stmt = conn.prepare(&query)?;
+    tracing::debug!("Executing from_substrait_json with {} chars", plan_json.len());
+    let mut rows = stmt.query([plan_json.as_str()])?;
+    tracing::debug!("Query executed, processing results");
 
     // 9. Convert rows to JSON
     let json_result = duckdb_rows_to_json(&mut rows)?;
+    tracing::debug!("Results converted to JSON");
 
     // 10. Return plan info + results
-    let plan_info = format!("Substrait plan: {} bytes", plan_bytes.len());
+    let plan_info = format!("Substrait plan: {} chars JSON", plan_json.len());
+    tracing::info!("Substrait execution complete: {} rows",
+        json_result.get("row_count").and_then(|v| v.as_u64()).unwrap_or(0));
     Ok((plan_info, json_result))
 }
 
 /// Load Substrait extension into DuckDB connection
 fn load_substrait_extension(conn: &duckdb::Connection) -> Result<(), Box<dyn std::error::Error>> {
+    // First, check if the extension is already loaded (e.g., statically linked in custom build)
+    let check_query = "SELECT COUNT(*) FROM duckdb_functions() WHERE function_name = 'from_substrait_json'";
+    if let Ok(mut stmt) = conn.prepare(check_query) {
+        if let Ok(count) = stmt.query_row([], |row| row.get::<_, i64>(0)) {
+            if count > 0 {
+                tracing::info!("Substrait extension already loaded (statically linked or previously loaded)");
+                return Ok(());
+            }
+        }
+    }
+
     // Try to load the Substrait extension
     // Option 1: If SUBSTRAIT_EXTENSION_PATH is set, use that
     if let Ok(extension_path) = std::env::var("SUBSTRAIT_EXTENSION_PATH") {

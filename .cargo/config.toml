@@ -1,0 +1,2 @@
+[target.x86_64-apple-darwin]
+rustflags = ["-L", "/Users/colin/Dev/duckdb-substrait-extension/build/release/src"]
