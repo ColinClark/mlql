@@ -1,2 +1,2 @@
 [target.x86_64-apple-darwin]
-rustflags = ["-L", "/Users/colin/Dev/truepop/mlql/duckdb-substrait-upgrade/build/release/src"]
+rustflags = ["-L", "/Users/colin/Dev/duckdb-substrait-extension/build/duckdb-substrait/src"]

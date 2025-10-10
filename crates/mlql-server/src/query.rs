@@ -138,12 +138,18 @@ pub async fn execute_ir_substrait(
         })?;
     tracing::debug!("Plan serialized: {} chars", plan_json.len());
 
-    // 8. Execute via from_substrait_json() using CALL syntax
-    tracing::debug!("Preparing from_substrait_json CALL");
-    let query = format!("CALL from_substrait_json(?)"  );
-    let mut stmt = conn.prepare(&query)?;
+    // 8. Execute via from_substrait_json() - inline JSON to avoid DuckDB 1.4.x parameter binding bug
+    tracing::debug!("Preparing from_substrait_json CALL with inlined JSON");
+
+    // Escape single quotes in JSON for SQL string literal
+    let escaped_json = plan_json.replace("'", "''");
+
+    // Inline the JSON directly in SQL (workaround for DuckDB 1.4.x hanging with parameters)
+    let query = format!("SELECT * FROM from_substrait_json('{}')", escaped_json);
+
     tracing::debug!("Executing from_substrait_json with {} chars", plan_json.len());
-    let mut rows = stmt.query([plan_json.as_str()])?;
+    let mut stmt = conn.prepare(&query)?;
+    let mut rows = stmt.query([])?; // No parameters - JSON is inlined
     tracing::debug!("Query executed, processing results");
 
     // 9. Convert rows to JSON
@@ -198,7 +204,7 @@ fn load_substrait_extension(conn: &duckdb::Connection) -> Result<(), Box<dyn std
                 return Err(format!(
                     "Failed to load substrait extension: {}\n\
                      Please set SUBSTRAIT_EXTENSION_PATH to the path of your custom extension:\n\
-                     export SUBSTRAIT_EXTENSION_PATH=/Users/colin/Dev/truepop/mlql/duckdb-substrait-upgrade/build/release/extension/substrait/substrait.duckdb_extension",
+                     export SUBSTRAIT_EXTENSION_PATH=/Users/colin/Dev/duckdb-substrait-extension/build/release/package/extensions/substrait.duckdb_extension",
                     e
                 ).into());
             }
