@@ -191,10 +191,32 @@ fn ir_to_sql(program: &mlql_ir::Program) -> Result<String, ExecutionError> {
     build_sql_query(&table_name, &pipeline.ops)
 }
 
+/// Context for SQL generation with CTE tracking
+struct SqlGenerationContext {
+    /// List of generated CTEs (WITH clauses)
+    ctes: Vec<String>,
+    /// Current data source (table name or CTE name)
+    current_source: String,
+    /// Counter for unique CTE naming
+    cte_counter: u32,
+}
+
+/// Determine if a Select operator needs a CTE
+/// (i.e., if it contains any computed columns with aliases)
+fn needs_cte(projections: &[mlql_ir::Projection]) -> bool {
+    projections.iter().any(|p| matches!(p, mlql_ir::Projection::Aliased { .. }))
+}
+
 /// Build SQL query from table and operators
 fn build_sql_query(table: &str, operators: &[mlql_ir::Operator]) -> Result<String, ExecutionError> {
+    // Initialize context
+    let mut ctx = SqlGenerationContext {
+        ctes: Vec::new(),
+        current_source: table.to_string(),
+        cte_counter: 0,
+    };
+
     let mut select_clause = "*".to_string();
-    let mut from_clause = table.to_string();
     let mut where_clause = None;
     let mut group_clause = None;
     let mut order_clause = None;
@@ -205,25 +227,57 @@ fn build_sql_query(table: &str, operators: &[mlql_ir::Operator]) -> Result<Strin
     for op in operators {
         match op {
             mlql_ir::Operator::Select { projections } => {
-                // Build SELECT list
-                let select_items: Vec<String> = projections.iter().map(|proj| {
-                    match proj {
-                        mlql_ir::Projection::Expr(expr) => {
-                            // Check if it's a wildcard (column named "*")
-                            if let mlql_ir::Expr::Column { col } = expr {
-                                if col.column == "*" && col.table.is_none() {
-                                    return "*".to_string();
+                // Check if this Select needs a CTE (has computed columns)
+                if needs_cte(projections) {
+                    // Build SELECT list for the CTE
+                    let select_items: Vec<String> = projections.iter().map(|proj| {
+                        match proj {
+                            mlql_ir::Projection::Expr(expr) => {
+                                // Check if it's a wildcard (column named "*")
+                                if let mlql_ir::Expr::Column { col } = expr {
+                                    if col.column == "*" && col.table.is_none() {
+                                        return "*".to_string();
+                                    }
                                 }
+                                expr_to_sql(expr)
                             }
-                            expr_to_sql(expr)
+                            mlql_ir::Projection::Aliased { expr, alias } => {
+                                format!("{} AS \"{}\"", expr_to_sql(expr), alias)
+                            }
                         }
-                        mlql_ir::Projection::Aliased { expr, alias } => {
-                            format!("{} AS {}", expr_to_sql(expr), alias)
-                        }
-                    }
-                }).collect();
+                    }).collect();
 
-                select_clause = select_items.join(", ");
+                    // Create a new CTE
+                    ctx.cte_counter += 1;
+                    let cte_name = format!("cte_{}", ctx.cte_counter);
+                    let cte_sql = format!("  {} AS (SELECT {} FROM {})",
+                        cte_name, select_items.join(", "), ctx.current_source);
+                    ctx.ctes.push(cte_sql);
+                    ctx.current_source = cte_name;
+
+                    // Reset select_clause to * for final query
+                    select_clause = "*".to_string();
+                } else {
+                    // Simple column selection, no CTE needed
+                    let select_items: Vec<String> = projections.iter().map(|proj| {
+                        match proj {
+                            mlql_ir::Projection::Expr(expr) => {
+                                // Check if it's a wildcard (column named "*")
+                                if let mlql_ir::Expr::Column { col } = expr {
+                                    if col.column == "*" && col.table.is_none() {
+                                        return "*".to_string();
+                                    }
+                                }
+                                expr_to_sql(expr)
+                            }
+                            mlql_ir::Projection::Aliased { expr, alias } => {
+                                format!("{} AS \"{}\"", expr_to_sql(expr), alias)
+                            }
+                        }
+                    }).collect();
+
+                    select_clause = select_items.join(", ");
+                }
             }
             mlql_ir::Operator::Filter { condition } => {
                 where_clause = Some(expr_to_sql(condition));
@@ -255,8 +309,8 @@ fn build_sql_query(table: &str, operators: &[mlql_ir::Operator]) -> Result<Strin
                 // Build ON condition
                 let on_condition = expr_to_sql(on);
 
-                // Append to FROM clause
-                from_clause.push_str(&format!(" {} {} ON {}", join_type_sql, source_sql, on_condition));
+                // Append to current source
+                ctx.current_source.push_str(&format!(" {} {} ON {}", join_type_sql, source_sql, on_condition));
             }
             mlql_ir::Operator::GroupBy { keys, aggs } => {
                 // Build GROUP BY keys
@@ -312,8 +366,18 @@ fn build_sql_query(table: &str, operators: &[mlql_ir::Operator]) -> Result<Strin
     }
 
     // Build final SQL
+    let mut sql = String::new();
+
+    // Add CTEs if any
+    if !ctx.ctes.is_empty() {
+        sql.push_str("WITH\n");
+        sql.push_str(&ctx.ctes.join(",\n"));
+        sql.push('\n');
+    }
+
+    // Build main query
     let distinct_sql = if distinct { "DISTINCT " } else { "" };
-    let mut sql = format!("SELECT {}{} FROM {}", distinct_sql, select_clause, from_clause);
+    sql.push_str(&format!("SELECT {}{} FROM {}", distinct_sql, select_clause, ctx.current_source));
 
     if let Some(where_sql) = where_clause {
         sql.push_str(&format!(" WHERE {}", where_sql));
@@ -1046,6 +1110,203 @@ mod tests {
         // Verify: Should return 1 row joining all 3 tables
         println!("Multiple JOIN Results: {:?}", result);
         assert_eq!(result.row_count, 1);
+
+        Ok(())
+    }
+
+    #[test]
+    fn test_chained_select_operators() -> Result<(), Box<dyn std::error::Error>> {
+        // Setup
+        let executor = DuckExecutor::new()?;
+        executor.connection().execute_batch(
+            "CREATE TABLE trades (id INTEGER, symbol VARCHAR, high DECIMAL, low DECIMAL);
+             INSERT INTO trades VALUES
+                (1, 'AAPL', 150.0, 145.0),
+                (2, 'GOOGL', 2800.0, 2750.0),
+                (3, 'TSLA', 700.0, 680.0);"
+        )?;
+
+        // Test: Chained Selects creating computed columns
+        // First Select creates 'spread', second Select creates 'spread_pct'
+        let json_ir = r#"{
+            "pipeline": {
+                "source": {
+                    "type": "Table",
+                    "name": "trades"
+                },
+                "ops": [
+                    {
+                        "op": "Select",
+                        "projections": [
+                            {"type": "Column", "col": {"column": "symbol"}},
+                            {
+                                "expr": {
+                                    "type": "BinaryOp",
+                                    "op": "Sub",
+                                    "left": {"type": "Column", "col": {"column": "high"}},
+                                    "right": {"type": "Column", "col": {"column": "low"}}
+                                },
+                                "alias": "spread"
+                            }
+                        ]
+                    },
+                    {
+                        "op": "Select",
+                        "projections": [
+                            {"type": "Column", "col": {"column": "symbol"}},
+                            {
+                                "expr": {
+                                    "type": "BinaryOp",
+                                    "op": "Div",
+                                    "left": {"type": "Column", "col": {"column": "spread"}},
+                                    "right": {"type": "Literal", "value": 100}
+                                },
+                                "alias": "spread_pct"
+                            }
+                        ]
+                    },
+                    {
+                        "op": "Filter",
+                        "condition": {
+                            "type": "BinaryOp",
+                            "op": "Gt",
+                            "left": {"type": "Column", "col": {"column": "spread_pct"}},
+                            "right": {"type": "Literal", "value": 0.05}
+                        }
+                    }
+                ]
+            }
+        }"#;
+
+        let ir_program: mlql_ir::Program = serde_json::from_str(json_ir)?;
+        let result = executor.execute_ir(&ir_program, None)?;
+
+        // Verify: Should generate WITH cte_1 AS (...), cte_2 AS (...)
+        println!("SQL: {}", result.sql.as_ref().unwrap());
+        println!("Chained Select Results: {:?}", result);
+
+        // All symbols have spread_pct > 0.05
+        assert_eq!(result.row_count, 2);
+        assert_eq!(result.columns, vec!["symbol", "spread_pct"]);
+
+        Ok(())
+    }
+
+    #[test]
+    fn test_groupby_references_computed_column() -> Result<(), Box<dyn std::error::Error>> {
+        // Setup
+        let executor = DuckExecutor::new()?;
+        executor.connection().execute_batch(
+            "CREATE TABLE trades (id INTEGER, symbol VARCHAR, high DECIMAL, low DECIMAL);
+             INSERT INTO trades VALUES
+                (1, 'AAPL', 150.0, 145.0),
+                (2, 'AAPL', 152.0, 147.0),
+                (3, 'GOOGL', 2800.0, 2750.0),
+                (4, 'GOOGL', 2820.0, 2760.0);"
+        )?;
+
+        // Test: Select creates computed column, GroupBy aggregates it
+        let json_ir = r#"{
+            "pipeline": {
+                "source": {
+                    "type": "Table",
+                    "name": "trades"
+                },
+                "ops": [
+                    {
+                        "op": "Select",
+                        "projections": [
+                            {"type": "Column", "col": {"column": "symbol"}},
+                            {
+                                "expr": {
+                                    "type": "BinaryOp",
+                                    "op": "Sub",
+                                    "left": {"type": "Column", "col": {"column": "high"}},
+                                    "right": {"type": "Column", "col": {"column": "low"}}
+                                },
+                                "alias": "spread"
+                            }
+                        ]
+                    },
+                    {
+                        "op": "GroupBy",
+                        "keys": [{"column": "symbol"}],
+                        "aggs": {
+                            "avg_spread": {
+                                "func": "avg",
+                                "args": [
+                                    {"type": "Column", "col": {"column": "spread"}}
+                                ]
+                            }
+                        }
+                    }
+                ]
+            }
+        }"#;
+
+        let ir_program: mlql_ir::Program = serde_json::from_str(json_ir)?;
+        let result = executor.execute_ir(&ir_program, None)?;
+
+        // Verify: Should generate WITH cte_1 AS (SELECT spread...) SELECT AVG(spread) FROM cte_1
+        println!("SQL: {}", result.sql.as_ref().unwrap());
+        println!("GroupBy with Computed Column Results: {:?}", result);
+
+        assert_eq!(result.row_count, 2);
+        assert!(result.columns.contains(&"symbol".to_string()));
+        assert!(result.columns.contains(&"avg_spread".to_string()));
+
+        Ok(())
+    }
+
+    #[test]
+    fn test_select_columns_no_cte() -> Result<(), Box<dyn std::error::Error>> {
+        // Setup
+        let executor = DuckExecutor::new()?;
+        executor.connection().execute_batch(
+            "CREATE TABLE users (id INTEGER, name VARCHAR, age INTEGER);
+             INSERT INTO users VALUES (1, 'Alice', 30), (2, 'Bob', 25), (3, 'Charlie', 35);"
+        )?;
+
+        // Test: Simple column selection should NOT generate CTE
+        let json_ir = r#"{
+            "pipeline": {
+                "source": {
+                    "type": "Table",
+                    "name": "users"
+                },
+                "ops": [
+                    {
+                        "op": "Select",
+                        "projections": [
+                            {"type": "Column", "col": {"column": "name"}},
+                            {"type": "Column", "col": {"column": "age"}}
+                        ]
+                    },
+                    {
+                        "op": "Filter",
+                        "condition": {
+                            "type": "BinaryOp",
+                            "op": "Gt",
+                            "left": {"type": "Column", "col": {"column": "age"}},
+                            "right": {"type": "Literal", "value": 25}
+                        }
+                    }
+                ]
+            }
+        }"#;
+
+        let ir_program: mlql_ir::Program = serde_json::from_str(json_ir)?;
+        let result = executor.execute_ir(&ir_program, None)?;
+
+        // Verify: SQL should NOT contain WITH clause
+        let sql = result.sql.as_ref().unwrap();
+        println!("SQL (no CTE): {}", sql);
+        assert!(!sql.contains("WITH"));
+        assert!(!sql.contains("cte_"));
+
+        println!("Simple Select Results: {:?}", result);
+        assert_eq!(result.row_count, 2);
+        assert_eq!(result.columns, vec!["name", "age"]);
 
         Ok(())
     }
