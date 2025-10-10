@@ -49,7 +49,6 @@ Available Operators:
   "projections": [
     {"type": "Column", "col": {"column": "name"}},
     {
-      "type": "Aliased",
       "expr": {
         "type": "BinaryOp",
         "op": "Mul",
@@ -62,8 +61,20 @@ Available Operators:
 }
 ```
 
-CRITICAL: When a computed expression needs to be referenced later (in GroupBy, Sort, etc.),
-you MUST use the Aliased projection type with a name that subsequent operators can reference.
+⚠️  CRITICAL PROJECTION FORMAT - READ CAREFULLY ⚠️
+There are TWO projection formats you MUST distinguish:
+
+1. Simple Column: {"type": "Column", "col": {"column": "name"}}
+2. Aliased (computed/renamed): {"expr": <expression>, "alias": "name"}
+
+NOTICE: Aliased projections have "expr" and "alias" at the SAME level.
+There is NO "type": "Aliased" field!
+
+❌ WRONG: {"type": "Aliased", "expr": {...}, "alias": "name"}
+✅ RIGHT: {"expr": {...}, "alias": "name"}
+
+When a computed expression needs to be referenced later (in GroupBy, Sort, etc.),
+you MUST use the aliased format with "expr" and "alias" fields.
 
 3. Sort (ORDER BY):
 ```json
@@ -324,7 +335,6 @@ Response:
         "op": "Select",
         "projections": [
           {
-            "type": "Aliased",
             "expr": {
               "type": "BinaryOp",
               "op": "Sub",
@@ -350,6 +360,100 @@ Response:
 }
 
 Return ONLY the JSON, no other text."#;
+
+/// Validate pipeline structure and detect common LLM mistakes
+///
+/// Returns Ok(()) if valid, Err with a helpful error message if invalid
+fn validate_pipeline(pipeline: &Pipeline) -> Result<(), String> {
+    use mlql_ir::{Operator, Projection};
+
+    // Check each operator for common mistakes
+    for (idx, op) in pipeline.ops.iter().enumerate() {
+        match op {
+            Operator::Select { projections } => {
+                // This is where we catch the common mistake from user's error log
+                // The LLM was generating Projection::Expr with an "alias" field instead of Projection::Aliased
+                // However, serde's #[serde(untagged)] makes this impossible to detect at deserialization time
+                // because Projection::Expr(Expr) will match any expression object.
+
+                // We can't reliably detect this specific error pattern without custom deserializer,
+                // but we can at least verify projections are well-formed
+                for (proj_idx, proj) in projections.iter().enumerate() {
+                    match proj {
+                        Projection::Expr(_) => {
+                            // Simple expression projection - valid
+                        }
+                        Projection::Aliased { expr: _, alias } => {
+                            // Aliased projection - verify alias is not empty
+                            if alias.trim().is_empty() {
+                                return Err(format!(
+                                    "Operator {} (Select): Projection {} has an empty alias. \
+                                     Aliases must be non-empty strings.",
+                                    idx, proj_idx
+                                ));
+                            }
+                        }
+                    }
+                }
+            }
+            Operator::GroupBy { keys: _, aggs } => {
+                // Validate that if we reference a computed column, it should have been defined earlier
+                // This catches the error: "Referenced column 'difference' not found"
+
+                // Collect all available columns from previous operators
+                let mut available_columns = std::collections::HashSet::new();
+
+                // Add source table columns (we can't validate these without schema, assume valid)
+                // But we CAN check if previous Select operators created aliased columns
+                for prev_op in &pipeline.ops[..idx] {
+                    if let Operator::Select { projections } = prev_op {
+                        for proj in projections {
+                            if let Projection::Aliased { alias, .. } = proj {
+                                available_columns.insert(alias.clone());
+                            }
+                        }
+                    }
+                }
+
+                // Check aggregate arguments reference valid columns
+                for (agg_name, agg_call) in aggs {
+                    for arg in &agg_call.args {
+                        // Extract column references from the aggregate argument
+                        if let Some(col_name) = extract_column_name(arg) {
+                            // If it's not a known source column and not a computed column, warn
+                            if !available_columns.is_empty() && !available_columns.contains(&col_name) {
+                                return Err(format!(
+                                    "Operator {} (GroupBy): Aggregate '{}' references column '{}' which was not defined in a previous Select operator. \
+                                     \n\nDid you forget to create an aliased projection?\
+                                     \n\nIf you're computing a value (like subtraction), you MUST use a Select operator BEFORE GroupBy:\
+                                     \n  1. Add a Select operator with aliased projection: {{\"expr\": {{...}}, \"alias\": \"{}\"}} \
+                                     \n  2. Then reference that alias in the GroupBy aggregate arguments\
+                                     \n\nExample:\
+                                     \n  {{\"op\": \"Select\", \"projections\": [{{\"expr\": {{\"type\": \"BinaryOp\", \"op\": \"Sub\", ...}}, \"alias\": \"{}\"}}]}}\
+                                     \n  {{\"op\": \"GroupBy\", \"keys\": [], \"aggs\": {{\"avg\": {{\"func\": \"avg\", \"args\": [{{\"type\": \"Column\", \"col\": {{\"column\": \"{}\"}}}}]}}}}}}",
+                                    idx, agg_name, col_name, col_name, col_name, col_name
+                                ));
+                            }
+                        }
+                    }
+                }
+            }
+            _ => {
+                // Other operators - no specific validation yet
+            }
+        }
+    }
+
+    Ok(())
+}
+
+/// Extract column name from an expression (simple cases only)
+fn extract_column_name(expr: &mlql_ir::Expr) -> Option<String> {
+    match expr {
+        mlql_ir::Expr::Column { col } => Some(col.column.clone()),
+        _ => None,
+    }
+}
 
 /// Convert natural language query to MLQL IR using OpenAI with error retry loop
 #[allow(dead_code)]
@@ -437,7 +541,29 @@ pub async fn natural_language_to_ir_with_catalog(
 
         match pipeline_result {
             Some(pipeline) => {
-                // Success! Return the pipeline
+                // Validate the pipeline before returning
+                if let Err(validation_error) = validate_pipeline(&pipeline) {
+                    if attempt == MAX_RETRIES - 1 {
+                        // Last attempt, return the validation error
+                        return Err(validation_error.into());
+                    }
+
+                    // Add validation feedback to conversation and retry
+                    tracing::warn!("Pipeline validation failed (attempt {}): {}", attempt + 1, validation_error);
+                    messages.push(ChatCompletionRequestMessage::Assistant(
+                        async_openai::types::ChatCompletionRequestAssistantMessageArgs::default()
+                            .content(content.clone())
+                            .build()?,
+                    ));
+                    messages.push(ChatCompletionRequestMessage::User(
+                        ChatCompletionRequestUserMessageArgs::default()
+                            .content(format!("Error: {}. Please fix this and regenerate the IR.", validation_error))
+                            .build()?,
+                    ));
+                    continue; // Retry with validation feedback
+                }
+
+                // Success! Return the validated pipeline
                 return Ok(pipeline);
             }
             None => {
