@@ -202,6 +202,8 @@ struct SqlGenerationContext {
     /// Current schema (available columns at this point in the pipeline)
     /// Maps column names to whether they need CTE wrapping
     current_schema: std::collections::HashSet<String>,
+    /// Track if we've seen a GroupBy operator (determines WHERE vs HAVING)
+    has_group_by: bool,
 }
 
 impl SqlGenerationContext {
@@ -211,6 +213,7 @@ impl SqlGenerationContext {
             current_source: table,
             cte_counter: 0,
             current_schema: std::collections::HashSet::new(),
+            has_group_by: false,
         }
     }
 
@@ -285,6 +288,7 @@ fn build_sql_query(table: &str, operators: &[mlql_ir::Operator]) -> Result<Strin
 
     let mut select_clause = "*".to_string();
     let mut where_clause = None;
+    let mut having_clause = None;
     let mut group_clause = None;
     let mut order_clause = None;
     let mut limit_clause = None;
@@ -352,7 +356,13 @@ fn build_sql_query(table: &str, operators: &[mlql_ir::Operator]) -> Result<Strin
                 ctx.update_schema_for_select(projections);
             }
             mlql_ir::Operator::Filter { condition } => {
-                where_clause = Some(expr_to_sql(condition));
+                // If we've already seen a GroupBy, this filter should become a HAVING clause
+                // Otherwise it's a regular WHERE clause
+                if ctx.has_group_by {
+                    having_clause = Some(expr_to_sql(condition));
+                } else {
+                    where_clause = Some(expr_to_sql(condition));
+                }
             }
             mlql_ir::Operator::Join { source, on, join_type } => {
                 // Build JOIN clause
@@ -428,6 +438,9 @@ fn build_sql_query(table: &str, operators: &[mlql_ir::Operator]) -> Result<Strin
                 for (alias, _) in aggs {
                     ctx.current_schema.insert(alias.clone());
                 }
+
+                // Mark that we've seen a GroupBy - subsequent filters should use HAVING
+                ctx.has_group_by = true;
             }
             mlql_ir::Operator::Sort { keys } => {
                 let order_items: Vec<String> = keys.iter().map(|key| {
@@ -471,6 +484,10 @@ fn build_sql_query(table: &str, operators: &[mlql_ir::Operator]) -> Result<Strin
 
     if let Some(group_sql) = group_clause {
         sql.push_str(&format!(" GROUP BY {}", group_sql));
+    }
+
+    if let Some(having_sql) = having_clause {
+        sql.push_str(&format!(" HAVING {}", having_sql));
     }
 
     if let Some(order_sql) = order_clause {
