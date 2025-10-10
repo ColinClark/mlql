@@ -159,6 +159,107 @@ Keywords that indicate JOINs needed:
 
 DO NOT just filter one table when the query asks about data from another table!
 
+⚠️  CRITICAL: Choosing JOIN Columns ⚠️
+
+When you've identified that a JOIN is needed, you MUST choose the correct columns to join on:
+
+1. Look for FOREIGN KEY patterns:
+   - Column names like "user_id", "order_id", "product_id" typically reference "id" in another table
+   - Pattern: table1.id = table2.<table1_name>_id
+   - Example: users.id = orders.user_id
+   - Example: products.id = order_items.product_id
+
+2. Match column names SEMANTICALLY:
+   - Columns with similar/matching names often represent relationships
+   - "country" column in one table matches "country" in another
+   - "state" column in one table matches "state" in another
+   - Example: companies.state = bank_failures.state
+   - Example: users.country = countries.country_code
+
+3. Recognize when tables have NO natural relationship:
+   - If column names don't match semantically, tables may be unrelated
+   - DON'T join "company_name" with "bank_name" unless query explicitly asks
+   - DON'T join on columns with completely different meanings
+   - Example BAD: companies.Company = bank_failures.Bank (different entities!)
+   - Example BAD: users.name = products.name (unrelated!)
+
+4. Use the schema information provided:
+   - If schema shows foreign key constraints, use those columns
+   - If no foreign keys exist, look for matching column names
+   - If no matching columns exist, the tables may not be joinable
+
+EXAMPLES of Good vs Bad JOINs:
+
+✅ GOOD: "users with orders"
+{
+  "source": {"type": "Table", "name": "users", "alias": "u"},
+  "ops": [{
+    "op": "Join",
+    "source": {"type": "Table", "name": "orders", "alias": "o"},
+    "on": {
+      "type": "BinaryOp",
+      "op": "Eq",
+      "left": {"type": "Column", "col": {"table": "u", "column": "id"}},
+      "right": {"type": "Column", "col": {"table": "o", "column": "user_id"}}
+    },
+    "join_type": "Inner"
+  }]
+}
+Reason: "user_id" is a clear foreign key reference to "id"
+
+✅ GOOD: "companies in the same state as failed banks"
+{
+  "source": {"type": "Table", "name": "companies", "alias": "c"},
+  "ops": [{
+    "op": "Join",
+    "source": {"type": "Table", "name": "bank_failures", "alias": "b"},
+    "on": {
+      "type": "BinaryOp",
+      "op": "Eq",
+      "left": {"type": "Column", "col": {"table": "c", "column": "State"}},
+      "right": {"type": "Column", "col": {"table": "b", "column": "State"}}
+    },
+    "join_type": "Inner"
+  }]
+}
+Reason: Both tables have "State" column representing the same concept
+
+❌ BAD: "companies similar to banks"
+{
+  "source": {"type": "Table", "name": "companies", "alias": "c"},
+  "ops": [{
+    "op": "Join",
+    "source": {"type": "Table", "name": "bank_failures", "alias": "b"},
+    "on": {
+      "type": "BinaryOp",
+      "op": "Eq",
+      "left": {"type": "Column", "col": {"table": "c", "column": "Company"}},
+      "right": {"type": "Column", "col": {"table": "b", "column": "Bank"}}
+    },
+    "join_type": "Inner"
+  }]
+}
+Reason: "Company" and "Bank" are different entity names, NOT a relationship!
+Better: Look for a common column like "State" or "Industry" to join on
+
+❌ BAD: "products and suppliers"
+{
+  "source": {"type": "Table", "name": "products", "alias": "p"},
+  "ops": [{
+    "op": "Join",
+    "source": {"type": "Table", "name": "suppliers", "alias": "s"},
+    "on": {
+      "type": "BinaryOp",
+      "op": "Eq",
+      "left": {"type": "Column", "col": {"table": "p", "column": "name"}},
+      "right": {"type": "Column", "col": {"table": "s", "column": "name"}}
+    },
+    "join_type": "Inner"
+  }]
+}
+Reason: "name" in products is the product name, "name" in suppliers is the supplier name - unrelated!
+Better: Use "supplier_id" if it exists: products.supplier_id = suppliers.id
+
 Important Rules:
 1. Always return ONLY valid JSON - no markdown, no explanations
 2. Column references use {"type": "Column", "col": {"column": "name"}}
