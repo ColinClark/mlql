@@ -1472,4 +1472,68 @@ mod tests {
 
         Ok(())
     }
+
+    #[test]
+    fn test_groupby_with_having_clause() -> Result<(), Box<dyn std::error::Error>> {
+        // Setup
+        let executor = DuckExecutor::new()?;
+        executor.connection().execute_batch(
+            "CREATE TABLE orders (city VARCHAR, amount INTEGER);
+             INSERT INTO orders VALUES
+                ('NYC', 100), ('NYC', 200), ('NYC', 150),
+                ('LA', 50), ('LA', 75),
+                ('SF', 300), ('SF', 400), ('SF', 250);"
+        )?;
+
+        // Test: GroupBy followed by Filter (should generate HAVING clause)
+        // This is the key edge case - filter on aggregate value after GroupBy
+        let json_ir = r#"{
+            "pipeline": {
+                "source": {"type": "Table", "name": "orders"},
+                "ops": [
+                    {
+                        "op": "GroupBy",
+                        "keys": [{"column": "city"}],
+                        "aggs": {
+                            "total": {"func": "sum", "args": [{"type": "Column", "col": {"column": "amount"}}]}
+                        }
+                    },
+                    {
+                        "op": "Filter",
+                        "condition": {
+                            "type": "BinaryOp",
+                            "op": "Gt",
+                            "left": {"type": "Column", "col": {"column": "total"}},
+                            "right": {"type": "Literal", "value": 200}
+                        }
+                    }
+                ]
+            }
+        }"#;
+
+        let ir_program: mlql_ir::Program = serde_json::from_str(json_ir)?;
+        let result = executor.execute_ir(&ir_program, None)?;
+
+        // Verify: Should generate GROUP BY ... HAVING clause
+        let sql = result.sql.as_ref().unwrap();
+        println!("SQL: {}", sql);
+        assert!(sql.contains("GROUP BY"), "Should have GROUP BY clause");
+        assert!(sql.contains("HAVING"), "Should have HAVING clause");
+        assert!(!sql.contains("WHERE (\"total\""), "Should NOT have WHERE clause with aggregate column");
+
+        // Verify results: Only cities with total > 200
+        println!("Results: {:?}", result);
+        assert_eq!(result.row_count, 2); // NYC (450) and SF (950)
+        assert_eq!(result.columns, vec!["city", "total"]);
+
+        // Verify the cities returned
+        let cities: Vec<String> = result.rows.iter()
+            .map(|row| row[0].as_str().unwrap().to_string())
+            .collect();
+        assert!(cities.contains(&"NYC".to_string()));
+        assert!(cities.contains(&"SF".to_string()));
+        assert!(!cities.contains(&"LA".to_string()), "LA should be filtered out (total 125 not > 200)");
+
+        Ok(())
+    }
 }
