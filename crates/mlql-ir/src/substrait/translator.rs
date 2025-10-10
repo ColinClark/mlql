@@ -325,14 +325,14 @@ impl<'a> SubstraitTranslator<'a> {
     }
 
     fn translate_pipeline(&self, pipeline: &Pipeline) -> Result<substrait::proto::Rel, TranslateError> {
-        // Check if we have a GroupBy operator that needs projection in Read
-        let needs_projection = pipeline.ops.iter().any(|op| matches!(op, Operator::GroupBy { .. }));
-
-        let projection_fields = if needs_projection {
-            // Calculate which columns are needed for GroupBy
-            self.calculate_groupby_projection(pipeline)?
+        // Check if we need ReadRel projection (for Select or GroupBy operators)
+        // For DuckDB Substrait compatibility, column projections must be in ReadRel, not ProjectRel
+        let (projection_fields, skip_first_select) = if let Some(projection) = self.calculate_select_projection(pipeline)? {
+            (Some(projection), true)  // Put Select projection in ReadRel and skip the Select operator
+        } else if pipeline.ops.iter().any(|op| matches!(op, Operator::GroupBy { .. })) {
+            (self.calculate_groupby_projection(pipeline)?, false)
         } else {
-            None
+            (None, false)
         };
 
         // Start with the source and get the initial schema
@@ -348,7 +348,35 @@ impl<'a> SubstraitTranslator<'a> {
         };
 
         // Apply operators on top of the source relation, updating schema as we go
+        let mut skip_next_select = skip_first_select;
         for op in &pipeline.ops {
+            // Skip the first Select operator if we already applied its projection in ReadRel
+            if skip_next_select && matches!(op, Operator::Select { .. }) {
+                skip_next_select = false;
+                // Update schema for the skipped Select
+                current_schema = match op {
+                    Operator::Select { projections } => {
+                        let mut result = Vec::new();
+                        for (idx, proj) in projections.iter().enumerate() {
+                            match proj {
+                                Projection::Expr(Expr::Column { col }) => {
+                                    result.push(col.column.clone());
+                                }
+                                Projection::Aliased { alias, .. } => {
+                                    result.push(alias.clone());
+                                }
+                                Projection::Expr(_) => {
+                                    result.push(format!("expr_{}", idx));
+                                }
+                            }
+                        }
+                        result
+                    }
+                    _ => current_schema
+                };
+                continue;  // Skip translating this operator
+            }
+
             rel = self.translate_operator(op, rel, &current_schema)?;
 
             // Update schema after operators that change it
@@ -430,6 +458,34 @@ impl<'a> SubstraitTranslator<'a> {
             }
         }
         Ok(None)
+    }
+
+    fn calculate_select_projection(&self, pipeline: &Pipeline) -> Result<Option<Vec<usize>>, TranslateError> {
+        // Check if the first operator is a Select with only column references (no expressions)
+        // If so, we can optimize by putting the projection in ReadRel instead of using ProjectRel
+        if let Some(Operator::Select { projections }) = pipeline.ops.first() {
+            let full_schema = self.get_output_names(&pipeline.source)?;
+            let mut projection_indices = Vec::new();
+
+            // Check if all projections are simple column references
+            for proj in projections {
+                match proj {
+                    Projection::Expr(Expr::Column { col }) => {
+                        // Find the column index in the source schema
+                        let idx = full_schema.iter().position(|name| name == &col.column)
+                            .ok_or_else(|| TranslateError::Translation(format!("Column '{}' not found in schema", col.column)))?;
+                        projection_indices.push(idx);
+                    }
+                    // For now, only handle simple column references
+                    // Expressions and aliases need ProjectRel
+                    _ => return Ok(None)
+                }
+            }
+
+            Ok(Some(projection_indices))
+        } else {
+            Ok(None)
+        }
     }
 
     fn translate_source_with_projection(&self, source: &Source, projection: Option<&Vec<usize>>) -> Result<substrait::proto::Rel, TranslateError> {

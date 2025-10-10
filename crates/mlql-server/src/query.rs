@@ -137,6 +137,7 @@ pub async fn execute_ir_substrait(
             format!("JSON serialization failed: {}", e)
         })?;
     tracing::debug!("Plan serialized: {} chars", plan_json.len());
+    tracing::debug!("Substrait plan JSON: {}", plan_json);
 
     // 8. Execute via from_substrait_json() using CALL syntax
     tracing::debug!("Preparing from_substrait_json CALL");
