@@ -1536,4 +1536,338 @@ mod tests {
 
         Ok(())
     }
+
+    #[test]
+    fn test_sort_asc() -> Result<(), Box<dyn std::error::Error>> {
+        // Setup
+        let executor = DuckExecutor::new()?;
+        executor.connection().execute_batch(
+            "CREATE TABLE products (id INTEGER, name VARCHAR, price INTEGER);
+             INSERT INTO products VALUES
+                (1, 'Widget', 16),
+                (2, 'Gadget', 30),
+                (3, 'Doohickey', 10),
+                (4, 'Thingamajig', 20);"
+        )?;
+
+        // Test: Sort by price ascending
+        let json_ir = r#"{
+            "pipeline": {
+                "source": {"type": "Table", "name": "products"},
+                "ops": [
+                    {
+                        "op": "Sort",
+                        "keys": [{
+                            "expr": {"type": "Column", "col": {"column": "price"}},
+                            "desc": false
+                        }]
+                    }
+                ]
+            }
+        }"#;
+
+        let ir_program: mlql_ir::Program = serde_json::from_str(json_ir)?;
+        let result = executor.execute_ir(&ir_program, None)?;
+
+        // Verify: Should generate ORDER BY price ASC
+        let sql = result.sql.as_ref().unwrap();
+        println!("SQL: {}", sql);
+        assert!(sql.contains("ORDER BY"), "Should have ORDER BY clause");
+        assert!(sql.contains("ASC") || !sql.contains("DESC"), "Should be ascending order");
+
+        // Verify results: Ordered by price ascending
+        println!("Results: {:?}", result);
+        assert_eq!(result.row_count, 4);
+
+        // First row should be cheapest (Doohickey, 10)
+        assert_eq!(result.rows[0][1].as_str().unwrap(), "Doohickey");
+
+        // Last row should be most expensive (Gadget, 30)
+        assert_eq!(result.rows[3][1].as_str().unwrap(), "Gadget");
+
+        Ok(())
+    }
+
+    #[test]
+    fn test_sort_desc() -> Result<(), Box<dyn std::error::Error>> {
+        // Setup
+        let executor = DuckExecutor::new()?;
+        executor.connection().execute_batch(
+            "CREATE TABLE products (id INTEGER, name VARCHAR, price INTEGER);
+             INSERT INTO products VALUES
+                (1, 'Widget', 16),
+                (2, 'Gadget', 30),
+                (3, 'Doohickey', 10),
+                (4, 'Thingamajig', 20);"
+        )?;
+
+        // Test: Sort by price descending
+        let json_ir = r#"{
+            "pipeline": {
+                "source": {"type": "Table", "name": "products"},
+                "ops": [
+                    {
+                        "op": "Sort",
+                        "keys": [{
+                            "expr": {"type": "Column", "col": {"column": "price"}},
+                            "desc": true
+                        }]
+                    }
+                ]
+            }
+        }"#;
+
+        let ir_program: mlql_ir::Program = serde_json::from_str(json_ir)?;
+        let result = executor.execute_ir(&ir_program, None)?;
+
+        // Verify: Should generate ORDER BY price DESC
+        let sql = result.sql.as_ref().unwrap();
+        assert!(sql.contains("ORDER BY"), "Should have ORDER BY clause");
+        assert!(sql.contains("DESC"), "Should be descending order");
+
+        // Verify results: Ordered by price descending
+        assert_eq!(result.row_count, 4);
+
+        // First row should be most expensive (Gadget, 30)
+        assert_eq!(result.rows[0][1].as_str().unwrap(), "Gadget");
+
+        // Last row should be cheapest (Doohickey, 10)
+        assert_eq!(result.rows[3][1].as_str().unwrap(), "Doohickey");
+
+        Ok(())
+    }
+
+    #[test]
+    fn test_take_limit() -> Result<(), Box<dyn std::error::Error>> {
+        // Setup
+        let executor = DuckExecutor::new()?;
+        executor.connection().execute_batch(
+            "CREATE TABLE products (id INTEGER, name VARCHAR, price INTEGER);
+             INSERT INTO products VALUES
+                (1, 'Widget', 16),
+                (2, 'Gadget', 30),
+                (3, 'Doohickey', 10),
+                (4, 'Thingamajig', 20),
+                (5, 'Gizmo', 25);"
+        )?;
+
+        // Test: Take/LIMIT 3 rows
+        let json_ir = r#"{
+            "pipeline": {
+                "source": {"type": "Table", "name": "products"},
+                "ops": [
+                    {
+                        "op": "Take",
+                        "limit": 3
+                    }
+                ]
+            }
+        }"#;
+
+        let ir_program: mlql_ir::Program = serde_json::from_str(json_ir)?;
+        let result = executor.execute_ir(&ir_program, None)?;
+
+        // Verify: Should generate LIMIT 3
+        let sql = result.sql.as_ref().unwrap();
+        assert!(sql.contains("LIMIT 3"), "Should have LIMIT 3 clause");
+
+        // Verify results: Only 3 rows
+        assert_eq!(result.row_count, 3);
+
+        Ok(())
+    }
+
+    #[test]
+    fn test_sort_and_take_combination() -> Result<(), Box<dyn std::error::Error>> {
+        // Setup
+        let executor = DuckExecutor::new()?;
+        executor.connection().execute_batch(
+            "CREATE TABLE products (id INTEGER, name VARCHAR, price INTEGER);
+             INSERT INTO products VALUES
+                (1, 'Widget', 16),
+                (2, 'Gadget', 30),
+                (3, 'Doohickey', 10),
+                (4, 'Thingamajig', 20),
+                (5, 'Gizmo', 25);"
+        )?;
+
+        // Test: Sort DESC + Take 2 (top 2 most expensive)
+        let json_ir = r#"{
+            "pipeline": {
+                "source": {"type": "Table", "name": "products"},
+                "ops": [
+                    {
+                        "op": "Sort",
+                        "keys": [{
+                            "expr": {"type": "Column", "col": {"column": "price"}},
+                            "desc": true
+                        }]
+                    },
+                    {
+                        "op": "Take",
+                        "limit": 2
+                    }
+                ]
+            }
+        }"#;
+
+        let ir_program: mlql_ir::Program = serde_json::from_str(json_ir)?;
+        let result = executor.execute_ir(&ir_program, None)?;
+
+        // Verify: Should generate ORDER BY ... DESC LIMIT 2
+        let sql = result.sql.as_ref().unwrap();
+        assert!(sql.contains("ORDER BY"), "Should have ORDER BY clause");
+        assert!(sql.contains("DESC"), "Should be descending order");
+        assert!(sql.contains("LIMIT 2"), "Should have LIMIT 2");
+
+        // Verify results: Top 2 most expensive products
+        assert_eq!(result.row_count, 2);
+        assert_eq!(result.rows[0][1].as_str().unwrap(), "Gadget"); // 30
+        assert_eq!(result.rows[1][1].as_str().unwrap(), "Gizmo"); // 25
+
+        Ok(())
+    }
+
+    #[test]
+    fn test_complex_pipeline() -> Result<(), Box<dyn std::error::Error>> {
+        // Setup
+        let executor = DuckExecutor::new()?;
+        executor.connection().execute_batch(
+            "CREATE TABLE sales (region VARCHAR, product VARCHAR, revenue INTEGER, cost INTEGER);
+             INSERT INTO sales VALUES
+                ('North', 'Widget', 1000, 600),
+                ('North', 'Gadget', 1500, 800),
+                ('South', 'Widget', 800, 500),
+                ('South', 'Gadget', 2000, 900),
+                ('East', 'Widget', 500, 400),
+                ('East', 'Gadget', 1200, 700);"
+        )?;
+
+        // Test: Complex pipeline with Filter → GroupBy → Filter (HAVING) → Sort → Take
+        // Filter: revenue > 600  (excludes East Widget)
+        // GroupBy by region with sum(revenue) as total_revenue
+        // Filter (HAVING): total_revenue > 1500  (excludes East)
+        // Sort by total_revenue DESC
+        // Take 2 (top 2 regions)
+        let json_ir = r#"{
+            "pipeline": {
+                "source": {"type": "Table", "name": "sales"},
+                "ops": [
+                    {
+                        "op": "Filter",
+                        "condition": {
+                            "type": "BinaryOp",
+                            "op": "Gt",
+                            "left": {"type": "Column", "col": {"column": "revenue"}},
+                            "right": {"type": "Literal", "value": 600}
+                        }
+                    },
+                    {
+                        "op": "GroupBy",
+                        "keys": [{"column": "region"}],
+                        "aggs": {
+                            "total_revenue": {"func": "sum", "args": [{"type": "Column", "col": {"column": "revenue"}}]}
+                        }
+                    },
+                    {
+                        "op": "Filter",
+                        "condition": {
+                            "type": "BinaryOp",
+                            "op": "Gt",
+                            "left": {"type": "Column", "col": {"column": "total_revenue"}},
+                            "right": {"type": "Literal", "value": 1500}
+                        }
+                    },
+                    {
+                        "op": "Sort",
+                        "keys": [{
+                            "expr": {"type": "Column", "col": {"column": "total_revenue"}},
+                            "desc": true
+                        }]
+                    },
+                    {
+                        "op": "Take",
+                        "limit": 2
+                    }
+                ]
+            }
+        }"#;
+
+        let ir_program: mlql_ir::Program = serde_json::from_str(json_ir)?;
+        let result = executor.execute_ir(&ir_program, None)?;
+
+        // Verify SQL components
+        let sql = result.sql.as_ref().unwrap();
+        assert!(sql.contains("WHERE"), "Should have WHERE clause");
+        assert!(sql.contains("GROUP BY"), "Should have GROUP BY clause");
+        assert!(sql.contains("HAVING"), "Should have HAVING clause");
+        assert!(sql.contains("ORDER BY"), "Should have ORDER BY clause");
+        assert!(sql.contains("LIMIT 2"), "Should have LIMIT 2");
+
+        // Verify results: Top 2 regions by revenue (South: 2800, North: 2500)
+        assert_eq!(result.row_count, 2);
+        assert_eq!(result.rows[0][0].as_str().unwrap(), "South");
+        assert_eq!(result.rows[1][0].as_str().unwrap(), "North");
+
+        Ok(())
+    }
+
+    #[test]
+    fn test_all_aggregate_functions() -> Result<(), Box<dyn std::error::Error>> {
+        // Setup
+        let executor = DuckExecutor::new()?;
+        executor.connection().execute_batch(
+            "CREATE TABLE metrics (category VARCHAR, value INTEGER);
+             INSERT INTO metrics VALUES
+                ('A', 10),
+                ('A', 20),
+                ('A', 30),
+                ('B', 15),
+                ('B', 25);"
+        )?;
+
+        // Test: All aggregate functions (count, sum, avg, min, max)
+        let json_ir = r#"{
+            "pipeline": {
+                "source": {"type": "Table", "name": "metrics"},
+                "ops": [
+                    {
+                        "op": "GroupBy",
+                        "keys": [{"column": "category"}],
+                        "aggs": {
+                            "cnt": {"func": "count", "args": [{"type": "Column", "col": {"column": "value"}}]},
+                            "total": {"func": "sum", "args": [{"type": "Column", "col": {"column": "value"}}]},
+                            "average": {"func": "avg", "args": [{"type": "Column", "col": {"column": "value"}}]},
+                            "minimum": {"func": "min", "args": [{"type": "Column", "col": {"column": "value"}}]},
+                            "maximum": {"func": "max", "args": [{"type": "Column", "col": {"column": "value"}}]}
+                        }
+                    }
+                ]
+            }
+        }"#;
+
+        let ir_program: mlql_ir::Program = serde_json::from_str(json_ir)?;
+        let result = executor.execute_ir(&ir_program, None)?;
+
+        // Verify SQL contains all aggregates
+        let sql = result.sql.as_ref().unwrap();
+        assert!(sql.contains("count("), "Should have count aggregate");
+        assert!(sql.contains("sum("), "Should have sum aggregate");
+        assert!(sql.contains("avg("), "Should have avg aggregate");
+        assert!(sql.contains("min("), "Should have min aggregate");
+        assert!(sql.contains("max("), "Should have max aggregate");
+
+        // Verify results
+        assert_eq!(result.row_count, 2); // Two categories: A and B
+        // Verify all aggregate columns exist (order may vary)
+        assert_eq!(result.columns.len(), 6);
+        assert!(result.columns.contains(&"category".to_string()));
+        assert!(result.columns.contains(&"cnt".to_string()));
+        assert!(result.columns.contains(&"total".to_string()));
+        assert!(result.columns.contains(&"average".to_string()));
+        assert!(result.columns.contains(&"minimum".to_string()));
+        assert!(result.columns.contains(&"maximum".to_string()));
+
+        Ok(())
+    }
 }
