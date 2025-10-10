@@ -109,7 +109,35 @@ impl DuckExecutor {
                         let s = std::str::from_utf8(bytes).unwrap_or("");
                         serde_json::Value::String(s.to_string())
                     },
-                    _ => serde_json::Value::Null,  // TODO: Handle more types
+                    // Date types
+                    duckdb::types::ValueRef::Date32(days) => {
+                        // Date32 is days since 1970-01-01 (Unix epoch)
+                        use chrono::NaiveDate;
+                        let epoch = NaiveDate::from_ymd_opt(1970, 1, 1).unwrap();
+                        let date = epoch + chrono::Duration::days(days as i64);
+                        serde_json::Value::String(date.format("%Y-%m-%d").to_string())
+                    },
+                    duckdb::types::ValueRef::Timestamp(unit, value) => {
+                        // Convert timestamp to ISO 8601 string
+                        use chrono::DateTime;
+                        let micros = unit.to_micros(value);
+                        let secs = micros / 1_000_000;
+                        let nanos = ((micros % 1_000_000) * 1000) as u32;
+                        if let Some(dt) = DateTime::from_timestamp(secs, nanos) {
+                            serde_json::Value::String(dt.format("%Y-%m-%d %H:%M:%S").to_string())
+                        } else {
+                            serde_json::Value::Null
+                        }
+                    },
+                    duckdb::types::ValueRef::Time64(unit, value) => {
+                        // Time64 is time of day in microseconds
+                        let micros = unit.to_micros(value);
+                        let hours = micros / 3_600_000_000;
+                        let minutes = (micros % 3_600_000_000) / 60_000_000;
+                        let seconds = (micros % 60_000_000) / 1_000_000;
+                        serde_json::Value::String(format!("{:02}:{:02}:{:02}", hours, minutes, seconds))
+                    },
+                    _ => serde_json::Value::Null,  // TODO: Handle more types (Interval, List, Struct, etc.)
                 };
 
                 json_row.push(value);
@@ -1867,6 +1895,60 @@ mod tests {
         assert!(result.columns.contains(&"average".to_string()));
         assert!(result.columns.contains(&"minimum".to_string()));
         assert!(result.columns.contains(&"maximum".to_string()));
+
+        Ok(())
+    }
+
+    #[test]
+    fn test_date_serialization() -> Result<(), Box<dyn std::error::Error>> {
+        let executor = DuckExecutor::new()?;
+
+        // Create table with DATE column
+        executor.connection().execute_batch(
+            "CREATE TABLE events (id INTEGER, event_date DATE, event_timestamp TIMESTAMP);
+             INSERT INTO events VALUES
+                (1, DATE '2023-01-15', TIMESTAMP '2023-01-15 10:30:00'),
+                (2, DATE '2023-06-20', TIMESTAMP '2023-06-20 14:45:30'),
+                (3, DATE '2024-03-10', TIMESTAMP '2024-03-10 09:15:00');"
+        )?;
+
+        let json_ir = r#"{
+            "pipeline": {
+                "source": {"type": "Table", "name": "events"},
+                "ops": []
+            }
+        }"#;
+
+        let ir_program: mlql_ir::Program = serde_json::from_str(json_ir)?;
+        let result = executor.execute_ir(&ir_program, None)?;
+
+        // Verify we got 3 rows
+        assert_eq!(result.row_count, 3);
+        assert_eq!(result.columns, vec!["id", "event_date", "event_timestamp"]);
+
+        // **CRITICAL**: Date values should NOT be null
+        // This test will FAIL until date serialization is fixed
+        for (i, row) in result.rows.iter().enumerate() {
+            let date_value = &row[1];
+            let timestamp_value = &row[2];
+
+            // These assertions will fail with current implementation
+            assert!(!date_value.is_null(),
+                "Row {}: event_date should not be null, got: {:?}", i, date_value);
+            assert!(!timestamp_value.is_null(),
+                "Row {}: event_timestamp should not be null, got: {:?}", i, timestamp_value);
+
+            // Verify dates are strings in ISO format
+            assert!(date_value.is_string(),
+                "Row {}: event_date should be a string, got: {:?}", i, date_value);
+            assert!(timestamp_value.is_string(),
+                "Row {}: event_timestamp should be a string, got: {:?}", i, timestamp_value);
+        }
+
+        // Verify specific date values
+        assert_eq!(result.rows[0][1].as_str().unwrap(), "2023-01-15");
+        assert_eq!(result.rows[1][1].as_str().unwrap(), "2023-06-20");
+        assert_eq!(result.rows[2][1].as_str().unwrap(), "2024-03-10");
 
         Ok(())
     }

@@ -1,0 +1,2474 @@
+2025-10-10T18:15:24.013041Z  INFO mlql_server::logging: ✅ Logging system initialized format=Pretty output=File
+2025-10-10T18:15:24.013148Z DEBUG mlql_server::logging: Environment:
+2025-10-10T18:15:24.013166Z DEBUG mlql_server::logging:   RUST_LOG: debug
+2025-10-10T18:15:24.013184Z DEBUG mlql_server::logging:   LOG_FORMAT: pretty
+2025-10-10T18:15:24.013198Z DEBUG mlql_server::logging:   LOG_OUTPUT: file
+2025-10-10T18:15:24.013212Z DEBUG mlql_server::logging:   LOG_DIR: ./logs
+2025-10-10T18:15:24.253522Z  INFO rust_mcp_sdk::hyper_servers::server: 
+• Streamable HTTP Server is available at http://127.0.0.1:8080/mcp
+• SSE Server is available at http://127.0.0.1:8080/sse
+2025-10-10T18:15:47.141512Z  INFO rust_mcp_sdk::hyper_servers::routes::hyper_utils: a new client joined : 4155279e-4e06-4c11-b3d5-949482e79b7d
+2025-10-10T18:15:47.166371Z  INFO rust_mcp_sdk::hyper_servers::routes::hyper_utils: a new client joined : 82315f84-b864-485d-88bb-fe0544dcc550
+2025-10-10T18:15:47.251208Z  INFO mlql_server::mcp: Listing available tools
+2025-10-10T18:16:17.355803Z  INFO mlql_server::mcp: Tool called: catalog
+2025-10-10T18:16:17.356163Z  INFO mlql_server::mcp: Extracting catalog from database: data/demo.duckdb
+2025-10-10T18:16:26.674855Z  INFO mlql_server::mcp: Tool called: query
+2025-10-10T18:16:26.674924Z  INFO mlql_server::mcp: Executing query: show me bank failures in Missouri
+2025-10-10T18:16:26.674951Z  INFO mlql_server::mcp: Database: Some("data/demo.duckdb")
+2025-10-10T18:16:26.750042Z DEBUG reqwest::connect: starting new connection: https://api.openai.com/
+2025-10-10T18:16:30.685458Z  INFO mlql_server::llm: LLM Response (attempt 1): {
+  "pipeline": {
+    "source": {
+      "type": "Table",
+      "name": "bank_failures"
+    },
+    "ops": [
+      {
+        "op": "Filter",
+        "condition": {
+          "type": "BinaryOp",
+          "op": "Eq",
+          "left": {"type": "Column", "col": {"column": "State"}},
+          "right": {"type": "Literal", "value": "Missouri"}
+        }
+      }
+    ]
+  }
+}
+2025-10-10T18:16:30.686642Z  INFO mlql_server::mcp: Generated IR: {
+  "source": {
+    "type": "Table",
+    "name": "bank_failures"
+  },
+  "ops": [
+    {
+      "op": "Filter",
+      "condition": {
+        "type": "BinaryOp",
+        "op": "Eq",
+        "left": {
+          "type": "Column",
+          "col": {
+            "column": "State"
+          }
+        },
+        "right": {
+          "type": "Literal",
+          "value": "Missouri"
+        }
+      }
+    }
+  ]
+}
+2025-10-10T18:16:30.697800Z  INFO mlql_duck: Generated SQL: SELECT * FROM "bank_failures" WHERE ("State" = 'Missouri')
+2025-10-10T18:16:30.698904Z  INFO mlql_server::query: Generated SQL: SELECT * FROM "bank_failures" WHERE ("State" = 'Missouri')
+2025-10-10T18:16:30.700438Z  INFO mlql_server::mcp: Execution info: SELECT * FROM "bank_failures" WHERE ("State" = 'Missouri')
+2025-10-10T18:16:30.700487Z  INFO mlql_server::mcp: Query results: 16 rows
+2025-10-10T18:16:37.250669Z  INFO mlql_server::mcp: Tool called: query
+2025-10-10T18:16:37.250854Z  INFO mlql_server::mcp: Executing query: what's the total assets of all bank failures
+2025-10-10T18:16:37.250886Z  INFO mlql_server::mcp: Database: Some("data/demo.duckdb")
+2025-10-10T18:16:40.434436Z  INFO mlql_server::llm: LLM Response (attempt 1): {
+  "pipeline": {
+    "source": {"type": "Table", "name": "bank_failures"},
+    "ops": [
+      {
+        "op": "GroupBy",
+        "keys": [],
+        "aggs": {
+          "total_assets": {
+            "func": "sum",
+            "args": [{"type": "Column", "col": {"column": "Assets ($mil.)"}}]
+          }
+        }
+      }
+    ]
+  }
+}
+2025-10-10T18:16:40.434708Z  INFO mlql_server::mcp: Generated IR: {
+  "source": {
+    "type": "Table",
+    "name": "bank_failures"
+  },
+  "ops": [
+    {
+      "op": "GroupBy",
+      "keys": [],
+      "aggs": {
+        "total_assets": {
+          "func": "sum",
+          "args": [
+            {
+              "type": "Column",
+              "col": {
+                "column": "Assets ($mil.)"
+              }
+            }
+          ]
+        }
+      }
+    }
+  ]
+}
+2025-10-10T18:16:40.444155Z  INFO mlql_duck: Generated SQL: SELECT sum("Assets ($mil.)") AS total_assets FROM "bank_failures"
+2025-10-10T18:16:40.445538Z  INFO mlql_server::query: Generated SQL: SELECT sum("Assets ($mil.)") AS total_assets FROM "bank_failures"
+2025-10-10T18:16:40.446721Z  INFO mlql_server::mcp: Execution info: SELECT sum("Assets ($mil.)") AS total_assets FROM "bank_failures"
+2025-10-10T18:16:40.446757Z  INFO mlql_server::mcp: Query results: 1 rows
+2025-10-10T18:16:44.917815Z  INFO mlql_server::mcp: Tool called: query
+2025-10-10T18:16:44.917877Z  INFO mlql_server::mcp: Executing query: how many bank failures by state, show top 5
+2025-10-10T18:16:44.917894Z  INFO mlql_server::mcp: Database: Some("data/demo.duckdb")
+2025-10-10T18:16:48.902241Z  INFO mlql_server::llm: LLM Response (attempt 1): {
+  "pipeline": {
+    "source": {"type": "Table", "name": "bank_failures"},
+    "ops": [
+      {
+        "op": "GroupBy",
+        "keys": [{"column": "State"}],
+        "aggs": {
+          "total": {"func": "count", "args": []}
+        }
+      },
+      {
+        "op": "Sort",
+        "keys": [{"expr": {"type": "Column", "col": {"column": "total"}}, "desc": true}]
+      },
+      {
+        "op": "Take",
+        "limit": 5
+      }
+    ]
+  }
+}
+2025-10-10T18:16:48.902675Z  INFO mlql_server::mcp: Generated IR: {
+  "source": {
+    "type": "Table",
+    "name": "bank_failures"
+  },
+  "ops": [
+    {
+      "op": "GroupBy",
+      "keys": [
+        {
+          "column": "State"
+        }
+      ],
+      "aggs": {
+        "total": {
+          "func": "count"
+        }
+      }
+    },
+    {
+      "op": "Sort",
+      "keys": [
+        {
+          "expr": {
+            "type": "Column",
+            "col": {
+              "column": "total"
+            }
+          },
+          "desc": true
+        }
+      ]
+    },
+    {
+      "op": "Take",
+      "limit": 5
+    }
+  ]
+}
+2025-10-10T18:16:48.914641Z  INFO mlql_duck: Generated SQL: SELECT "State", count(*) AS total FROM "bank_failures" GROUP BY "State" ORDER BY "total" DESC LIMIT 5
+2025-10-10T18:16:48.916758Z  INFO mlql_server::query: Generated SQL: SELECT "State", count(*) AS total FROM "bank_failures" GROUP BY "State" ORDER BY "total" DESC LIMIT 5
+2025-10-10T18:16:48.918273Z  INFO mlql_server::mcp: Execution info: SELECT "State", count(*) AS total FROM "bank_failures" GROUP BY "State" ORDER BY "total" DESC LIMIT 5
+2025-10-10T18:16:48.918319Z  INFO mlql_server::mcp: Query results: 5 rows
+2025-10-10T18:16:57.003183Z  INFO mlql_server::mcp: Tool called: query
+2025-10-10T18:16:57.003241Z  INFO mlql_server::mcp: Executing query: find bank failures in California or New York with assets over 1000 million
+2025-10-10T18:16:57.003261Z  INFO mlql_server::mcp: Database: Some("data/demo.duckdb")
+2025-10-10T18:17:05.330223Z  INFO mlql_server::llm: LLM Response (attempt 1): {
+  "pipeline": {
+    "source": {
+      "type": "Table",
+      "name": "bank_failures"
+    },
+    "ops": [
+      {
+        "op": "Filter",
+        "condition": {
+          "type": "BinaryOp",
+          "op": "And",
+          "left": {
+            "type": "BinaryOp",
+            "op": "Gt",
+            "left": {
+              "type": "Column",
+              "col": {"column": "Assets ($mil.)"}
+            },
+            "right": {
+              "type": "Literal",
+              "value": 1000
+            }
+          },
+          "right": {
+            "type": "BinaryOp",
+            "op": "Or",
+            "left": {
+              "type": "BinaryOp",
+              "op": "Eq",
+              "left": {
+                "type": "Column",
+                "col": {"column": "State"}
+              },
+              "right": {
+                "type": "Literal",
+                "value": "California"
+              }
+            },
+            "right": {
+              "type": "BinaryOp",
+              "op": "Eq",
+              "left": {
+                "type": "Column",
+                "col": {"column": "State"}
+              },
+              "right": {
+                "type": "Literal",
+                "value": "New York"
+              }
+            }
+          }
+        }
+      }
+    ]
+  }
+}
+2025-10-10T18:17:05.330576Z  INFO mlql_server::mcp: Generated IR: {
+  "source": {
+    "type": "Table",
+    "name": "bank_failures"
+  },
+  "ops": [
+    {
+      "op": "Filter",
+      "condition": {
+        "type": "BinaryOp",
+        "op": "And",
+        "left": {
+          "type": "BinaryOp",
+          "op": "Gt",
+          "left": {
+            "type": "Column",
+            "col": {
+              "column": "Assets ($mil.)"
+            }
+          },
+          "right": {
+            "type": "Literal",
+            "value": 1000
+          }
+        },
+        "right": {
+          "type": "BinaryOp",
+          "op": "Or",
+          "left": {
+            "type": "BinaryOp",
+            "op": "Eq",
+            "left": {
+              "type": "Column",
+              "col": {
+                "column": "State"
+              }
+            },
+            "right": {
+              "type": "Literal",
+              "value": "California"
+            }
+          },
+          "right": {
+            "type": "BinaryOp",
+            "op": "Eq",
+            "left": {
+              "type": "Column",
+              "col": {
+                "column": "State"
+              }
+            },
+            "right": {
+              "type": "Literal",
+              "value": "New York"
+            }
+          }
+        }
+      }
+    }
+  ]
+}
+2025-10-10T18:17:05.339450Z  INFO mlql_duck: Generated SQL: SELECT * FROM "bank_failures" WHERE (("Assets ($mil.)" > 1000) AND (("State" = 'California') OR ("State" = 'New York')))
+2025-10-10T18:17:05.340341Z  INFO mlql_server::query: Generated SQL: SELECT * FROM "bank_failures" WHERE (("Assets ($mil.)" > 1000) AND (("State" = 'California') OR ("State" = 'New York')))
+2025-10-10T18:17:05.341677Z  INFO mlql_server::mcp: Execution info: SELECT * FROM "bank_failures" WHERE (("Assets ($mil.)" > 1000) AND (("State" = 'California') OR ("State" = 'New York')))
+2025-10-10T18:17:05.341711Z  INFO mlql_server::mcp: Query results: 21 rows
+2025-10-10T18:17:15.940542Z  INFO mlql_server::mcp: Tool called: query
+2025-10-10T18:17:15.940609Z  INFO mlql_server::mcp: Executing query: compare the male and female populations in Japan
+2025-10-10T18:17:15.940628Z  INFO mlql_server::mcp: Database: Some("data/demo.duckdb")
+2025-10-10T18:17:19.007513Z  INFO mlql_server::llm: LLM Response (attempt 1): {
+  "pipeline": {
+    "source": {
+      "type": "Table",
+      "name": "japan_population"
+    },
+    "ops": [
+      {
+        "op": "Select",
+        "projections": [
+          {"type": "Column", "col": {"column": "Age"}},
+          {"type": "Column", "col": {"column": "Males"}},
+          {"type": "Column", "col": {"column": "Females"}}
+        ]
+      }
+    ]
+  }
+}
+2025-10-10T18:17:19.008099Z  INFO mlql_server::mcp: Generated IR: {
+  "source": {
+    "type": "Table",
+    "name": "japan_population"
+  },
+  "ops": [
+    {
+      "op": "Select",
+      "projections": [
+        {
+          "type": "Column",
+          "col": {
+            "column": "Age"
+          }
+        },
+        {
+          "type": "Column",
+          "col": {
+            "column": "Males"
+          }
+        },
+        {
+          "type": "Column",
+          "col": {
+            "column": "Females"
+          }
+        }
+      ]
+    }
+  ]
+}
+2025-10-10T18:17:19.019667Z  INFO mlql_duck: Generated SQL: SELECT "Age", "Males", "Females" FROM "japan_population"
+2025-10-10T18:17:19.020401Z  INFO mlql_server::query: Generated SQL: SELECT "Age", "Males", "Females" FROM "japan_population"
+2025-10-10T18:17:19.022185Z  INFO mlql_server::mcp: Execution info: SELECT "Age", "Males", "Females" FROM "japan_population"
+2025-10-10T18:17:19.022224Z  INFO mlql_server::mcp: Query results: 101 rows
+2025-10-10T18:17:30.742611Z  INFO mlql_server::mcp: Tool called: query
+2025-10-10T18:17:30.742682Z  INFO mlql_server::mcp: Executing query: what's the total male and female population in Japan
+2025-10-10T18:17:30.742707Z  INFO mlql_server::mcp: Database: Some("data/demo.duckdb")
+2025-10-10T18:17:35.550482Z  INFO mlql_server::llm: LLM Response (attempt 1): {
+  "pipeline": {
+    "source": {
+      "type": "Table",
+      "name": "japan_population"
+    },
+    "ops": [
+      {
+        "op": "GroupBy",
+        "keys": [],
+        "aggs": {
+          "total_males": {
+            "func": "sum",
+            "args": [{"type": "Column", "col": {"column": "Males"}}]
+          },
+          "total_females": {
+            "func": "sum",
+            "args": [{"type": "Column", "col": {"column": "Females"}}]
+          }
+        }
+      }
+    ]
+  }
+}
+2025-10-10T18:17:35.551104Z  INFO mlql_server::mcp: Generated IR: {
+  "source": {
+    "type": "Table",
+    "name": "japan_population"
+  },
+  "ops": [
+    {
+      "op": "GroupBy",
+      "keys": [],
+      "aggs": {
+        "total_males": {
+          "func": "sum",
+          "args": [
+            {
+              "type": "Column",
+              "col": {
+                "column": "Males"
+              }
+            }
+          ]
+        },
+        "total_females": {
+          "func": "sum",
+          "args": [
+            {
+              "type": "Column",
+              "col": {
+                "column": "Females"
+              }
+            }
+          ]
+        }
+      }
+    }
+  ]
+}
+2025-10-10T18:17:35.563314Z  INFO mlql_duck: Generated SQL: SELECT sum("Males") AS total_males, sum("Females") AS total_females FROM "japan_population"
+2025-10-10T18:17:35.564024Z  INFO mlql_server::query: Generated SQL: SELECT sum("Males") AS total_males, sum("Females") AS total_females FROM "japan_population"
+2025-10-10T18:17:35.565333Z  INFO mlql_server::mcp: Execution info: SELECT sum("Males") AS total_males, sum("Females") AS total_females FROM "japan_population"
+2025-10-10T18:17:35.565375Z  INFO mlql_server::mcp: Query results: 1 rows
+2025-10-10T18:17:50.279252Z  INFO mlql_server::mcp: Tool called: query
+2025-10-10T18:17:50.279315Z  INFO mlql_server::mcp: Executing query: show companies ordered by profit margin
+2025-10-10T18:17:50.279332Z  INFO mlql_server::mcp: Database: Some("data/demo.duckdb")
+2025-10-10T18:17:55.600811Z  INFO mlql_server::llm: LLM Response (attempt 1): {
+  "pipeline": {
+    "source": {
+      "type": "Table",
+      "name": "companies"
+    },
+    "ops": [
+      {
+        "op": "Sort",
+        "keys": [
+          {
+            "expr": {
+              "type": "BinaryOp",
+              "op": "Div",
+              "left": {"type": "Column", "col": {"column": "PnL"}},
+              "right": {"type": "Column", "col": {"column": "Revenue"}}
+            },
+            "desc": false
+          }
+        ]
+      }
+    ]
+  }
+}
+2025-10-10T18:17:55.601393Z  INFO mlql_server::mcp: Generated IR: {
+  "source": {
+    "type": "Table",
+    "name": "companies"
+  },
+  "ops": [
+    {
+      "op": "Sort",
+      "keys": [
+        {
+          "expr": {
+            "type": "BinaryOp",
+            "op": "Div",
+            "left": {
+              "type": "Column",
+              "col": {
+                "column": "PnL"
+              }
+            },
+            "right": {
+              "type": "Column",
+              "col": {
+                "column": "Revenue"
+              }
+            }
+          },
+          "desc": false
+        }
+      ]
+    }
+  ]
+}
+2025-10-10T18:17:55.612410Z  INFO mlql_duck: Generated SQL: SELECT * FROM "companies" ORDER BY ("PnL" / "Revenue") ASC
+2025-10-10T18:17:55.613302Z  INFO mlql_server::query: Generated SQL: SELECT * FROM "companies" ORDER BY ("PnL" / "Revenue") ASC
+2025-10-10T18:17:55.614475Z  INFO mlql_server::mcp: Execution info: SELECT * FROM "companies" ORDER BY ("PnL" / "Revenue") ASC
+2025-10-10T18:17:55.614508Z  INFO mlql_server::mcp: Query results: 8 rows
+2025-10-10T18:19:11.020552Z  INFO mlql_server::mcp: Tool called: query
+2025-10-10T18:19:11.020625Z  INFO mlql_server::mcp: Executing query: show me something interesting about the data
+2025-10-10T18:19:11.020652Z  INFO mlql_server::mcp: Database: Some("data/demo.duckdb")
+2025-10-10T18:19:16.672788Z  INFO mlql_server::llm: LLM Response (attempt 1): {
+  "pipeline": {
+    "source": {"type": "Table", "name": "companies"},
+    "ops": [
+      {
+        "op": "Select",
+        "projections": [
+          {"type": "Column", "col": {"column": "Company"}},
+          {
+            "expr": {
+              "type": "BinaryOp",
+              "op": "Div",
+              "left": {"type": "Column", "col": {"column": "PnL"}},
+              "right": {"type": "Column", "col": {"column": "Revenue"}}
+            },
+            "alias": "ProfitMargin"
+          }
+        ]
+      },
+      {
+        "op": "Sort",
+        "keys": [{"expr": {"type": "Column", "col": {"column": "ProfitMargin"}}, "desc": true}]
+      },
+      {
+        "op": "Take",
+        "limit": 5
+      }
+    ]
+  }
+}
+2025-10-10T18:19:16.673213Z  INFO mlql_server::mcp: Generated IR: {
+  "source": {
+    "type": "Table",
+    "name": "companies"
+  },
+  "ops": [
+    {
+      "op": "Select",
+      "projections": [
+        {
+          "type": "Column",
+          "col": {
+            "column": "Company"
+          }
+        },
+        {
+          "expr": {
+            "type": "BinaryOp",
+            "op": "Div",
+            "left": {
+              "type": "Column",
+              "col": {
+                "column": "PnL"
+              }
+            },
+            "right": {
+              "type": "Column",
+              "col": {
+                "column": "Revenue"
+              }
+            }
+          },
+          "alias": "ProfitMargin"
+        }
+      ]
+    },
+    {
+      "op": "Sort",
+      "keys": [
+        {
+          "expr": {
+            "type": "Column",
+            "col": {
+              "column": "ProfitMargin"
+            }
+          },
+          "desc": true
+        }
+      ]
+    },
+    {
+      "op": "Take",
+      "limit": 5
+    }
+  ]
+}
+2025-10-10T18:19:16.683415Z  INFO mlql_duck: Generated SQL: WITH
+  cte_1 AS (SELECT "Company", ("PnL" / "Revenue") AS "ProfitMargin" FROM "companies")
+SELECT * FROM cte_1 ORDER BY "ProfitMargin" DESC LIMIT 5
+2025-10-10T18:19:16.684878Z  INFO mlql_server::query: Generated SQL: WITH
+  cte_1 AS (SELECT "Company", ("PnL" / "Revenue") AS "ProfitMargin" FROM "companies")
+SELECT * FROM cte_1 ORDER BY "ProfitMargin" DESC LIMIT 5
+2025-10-10T18:19:16.686230Z  INFO mlql_server::mcp: Execution info: WITH
+  cte_1 AS (SELECT "Company", ("PnL" / "Revenue") AS "ProfitMargin" FROM "companies")
+SELECT * FROM cte_1 ORDER BY "ProfitMargin" DESC LIMIT 5
+2025-10-10T18:19:16.686269Z  INFO mlql_server::mcp: Query results: 5 rows
+2025-10-10T18:19:42.702067Z  INFO mlql_server::mcp: Tool called: query
+2025-10-10T18:19:42.702135Z  INFO mlql_server::mcp: Executing query: are there any companies with similar names to banks that failed?
+2025-10-10T18:19:42.702156Z  INFO mlql_server::mcp: Database: Some("data/demo.duckdb")
+2025-10-10T18:19:45.645046Z  INFO mlql_server::llm: LLM Response (attempt 1): {
+  "pipeline": {
+    "source": {
+      "type": "Table",
+      "name": "companies"
+    },
+    "ops": [
+      {
+        "op": "Filter",
+        "condition": {
+          "type": "BinaryOp",
+          "op": "Like",
+          "left": {"type": "Column", "col": {"column": "Company"}},
+          "right": {"type": "Literal", "value": "%Bank%"}
+        }
+      }
+    ]
+  }
+}
+2025-10-10T18:19:45.645455Z  INFO mlql_server::mcp: Generated IR: {
+  "source": {
+    "type": "Table",
+    "name": "companies"
+  },
+  "ops": [
+    {
+      "op": "Filter",
+      "condition": {
+        "type": "BinaryOp",
+        "op": "Like",
+        "left": {
+          "type": "Column",
+          "col": {
+            "column": "Company"
+          }
+        },
+        "right": {
+          "type": "Literal",
+          "value": "%Bank%"
+        }
+      }
+    }
+  ]
+}
+2025-10-10T18:19:45.656622Z  INFO mlql_duck: Generated SQL: SELECT * FROM "companies" WHERE ("Company" LIKE '%Bank%')
+2025-10-10T18:19:45.658064Z  INFO mlql_server::query: Generated SQL: SELECT * FROM "companies" WHERE ("Company" LIKE '%Bank%')
+2025-10-10T18:19:45.659481Z  INFO mlql_server::mcp: Execution info: SELECT * FROM "companies" WHERE ("Company" LIKE '%Bank%')
+2025-10-10T18:19:45.659533Z  INFO mlql_server::mcp: Query results: 0 rows
+2025-10-10T18:20:43.989556Z  INFO mlql_server::mcp: Tool called: query
+2025-10-10T18:20:43.989618Z  INFO mlql_server::mcp: Executing query: show birth and death trends in Japan over time
+2025-10-10T18:20:43.989666Z  INFO mlql_server::mcp: Database: Some("data/demo.duckdb")
+2025-10-10T18:20:47.602920Z  INFO mlql_server::llm: LLM Response (attempt 1): {
+  "pipeline": {
+    "source": {
+      "type": "Table",
+      "name": "japan_births_deaths"
+    },
+    "ops": [
+      {
+        "op": "Select",
+        "projections": [
+          {"type": "Column", "col": {"column": "Year"}},
+          {"type": "Column", "col": {"column": "Births"}},
+          {"type": "Column", "col": {"column": "Deaths"}}
+        ]
+      }
+    ]
+  }
+}
+2025-10-10T18:20:47.603164Z  INFO mlql_server::mcp: Generated IR: {
+  "source": {
+    "type": "Table",
+    "name": "japan_births_deaths"
+  },
+  "ops": [
+    {
+      "op": "Select",
+      "projections": [
+        {
+          "type": "Column",
+          "col": {
+            "column": "Year"
+          }
+        },
+        {
+          "type": "Column",
+          "col": {
+            "column": "Births"
+          }
+        },
+        {
+          "type": "Column",
+          "col": {
+            "column": "Deaths"
+          }
+        }
+      ]
+    }
+  ]
+}
+2025-10-10T18:20:47.613999Z  INFO mlql_duck: Generated SQL: SELECT "Year", "Births", "Deaths" FROM "japan_births_deaths"
+2025-10-10T18:20:47.614752Z  INFO mlql_server::query: Generated SQL: SELECT "Year", "Births", "Deaths" FROM "japan_births_deaths"
+2025-10-10T18:20:47.616558Z  INFO mlql_server::mcp: Execution info: SELECT "Year", "Births", "Deaths" FROM "japan_births_deaths"
+2025-10-10T18:20:47.616600Z  INFO mlql_server::mcp: Query results: 118 rows
+2025-10-10T18:21:23.400002Z  INFO mlql_server::mcp: Tool called: query
+2025-10-10T18:21:23.400070Z  INFO mlql_server::mcp: Executing query: find banks with "First" in their name
+2025-10-10T18:21:23.400091Z  INFO mlql_server::mcp: Database: Some("data/demo.duckdb")
+2025-10-10T18:21:26.598756Z  INFO mlql_server::llm: LLM Response (attempt 1): {
+  "pipeline": {
+    "source": {"type": "Table", "name": "bank_failures"},
+    "ops": [
+      {
+        "op": "Filter",
+        "condition": {
+          "type": "BinaryOp",
+          "op": "Like",
+          "left": {"type": "Column", "col": {"column": "Bank"}},
+          "right": {"type": "Literal", "value": "%First%"}
+        }
+      }
+    ]
+  }
+}
+2025-10-10T18:21:26.599025Z  INFO mlql_server::mcp: Generated IR: {
+  "source": {
+    "type": "Table",
+    "name": "bank_failures"
+  },
+  "ops": [
+    {
+      "op": "Filter",
+      "condition": {
+        "type": "BinaryOp",
+        "op": "Like",
+        "left": {
+          "type": "Column",
+          "col": {
+            "column": "Bank"
+          }
+        },
+        "right": {
+          "type": "Literal",
+          "value": "%First%"
+        }
+      }
+    }
+  ]
+}
+2025-10-10T18:21:26.609347Z  INFO mlql_duck: Generated SQL: SELECT * FROM "bank_failures" WHERE ("Bank" LIKE '%First%')
+2025-10-10T18:21:26.610473Z  INFO mlql_server::query: Generated SQL: SELECT * FROM "bank_failures" WHERE ("Bank" LIKE '%First%')
+2025-10-10T18:21:26.612349Z  INFO mlql_server::mcp: Execution info: SELECT * FROM "bank_failures" WHERE ("Bank" LIKE '%First%')
+2025-10-10T18:21:26.612393Z  INFO mlql_server::mcp: Query results: 83 rows
+2025-10-10T18:22:48.163439Z  INFO mlql_server::mcp: Tool called: query
+2025-10-10T18:22:48.163505Z  INFO mlql_server::mcp: Executing query: calculate the average GDP per capita across all countries
+2025-10-10T18:22:48.163527Z  INFO mlql_server::mcp: Database: Some("data/demo.duckdb")
+2025-10-10T18:22:51.194528Z  INFO mlql_server::llm: LLM Response (attempt 1): {
+  "pipeline": {
+    "source": {
+      "type": "Table",
+      "name": "country_stats_scatter"
+    },
+    "ops": [
+      {
+        "op": "GroupBy",
+        "keys": [],
+        "aggs": {
+          "avg_gdp_per_capita": {
+            "func": "avg",
+            "args": [
+              {
+                "type": "Column",
+                "col": {
+                  "column": "GDPperCapita"
+                }
+              }
+            ]
+          }
+        }
+      }
+    ]
+  }
+}
+2025-10-10T18:22:51.195161Z  INFO mlql_server::mcp: Generated IR: {
+  "source": {
+    "type": "Table",
+    "name": "country_stats_scatter"
+  },
+  "ops": [
+    {
+      "op": "GroupBy",
+      "keys": [],
+      "aggs": {
+        "avg_gdp_per_capita": {
+          "func": "avg",
+          "args": [
+            {
+              "type": "Column",
+              "col": {
+                "column": "GDPperCapita"
+              }
+            }
+          ]
+        }
+      }
+    }
+  ]
+}
+2025-10-10T18:22:51.206538Z  INFO mlql_duck: Generated SQL: SELECT avg("GDPperCapita") AS avg_gdp_per_capita FROM "country_stats_scatter"
+2025-10-10T18:22:51.207055Z  INFO mlql_server::query: Generated SQL: SELECT avg("GDPperCapita") AS avg_gdp_per_capita FROM "country_stats_scatter"
+2025-10-10T18:22:51.208166Z  INFO mlql_server::mcp: Execution info: SELECT avg("GDPperCapita") AS avg_gdp_per_capita FROM "country_stats_scatter"
+2025-10-10T18:22:51.208200Z  INFO mlql_server::mcp: Query results: 1 rows
+2025-10-10T18:24:22.210172Z  INFO mlql_server::mcp: Tool called: query
+2025-10-10T18:24:22.210253Z  INFO mlql_server::mcp: Executing query: rank companies by their profit and loss
+2025-10-10T18:24:22.210274Z  INFO mlql_server::mcp: Database: Some("data/demo.duckdb")
+2025-10-10T18:24:22.308577Z DEBUG reqwest::connect: starting new connection: https://api.openai.com/
+2025-10-10T18:24:24.922386Z  INFO mlql_server::llm: LLM Response (attempt 1): {
+  "pipeline": {
+    "source": {
+      "type": "Table",
+      "name": "companies"
+    },
+    "ops": [
+      {
+        "op": "Sort",
+        "keys": [
+          {
+            "expr": {
+              "type": "Column",
+              "col": {
+                "column": "PnL"
+              }
+            },
+            "desc": true
+          }
+        ]
+      }
+    ]
+  }
+}
+2025-10-10T18:24:24.922839Z  INFO mlql_server::mcp: Generated IR: {
+  "source": {
+    "type": "Table",
+    "name": "companies"
+  },
+  "ops": [
+    {
+      "op": "Sort",
+      "keys": [
+        {
+          "expr": {
+            "type": "Column",
+            "col": {
+              "column": "PnL"
+            }
+          },
+          "desc": true
+        }
+      ]
+    }
+  ]
+}
+2025-10-10T18:24:24.933342Z  INFO mlql_duck: Generated SQL: SELECT * FROM "companies" ORDER BY "PnL" DESC
+2025-10-10T18:24:24.934171Z  INFO mlql_server::query: Generated SQL: SELECT * FROM "companies" ORDER BY "PnL" DESC
+2025-10-10T18:24:24.935434Z  INFO mlql_server::mcp: Execution info: SELECT * FROM "companies" ORDER BY "PnL" DESC
+2025-10-10T18:24:24.935488Z  INFO mlql_server::mcp: Query results: 8 rows
+2025-10-10T18:28:47.331275Z  INFO mlql_server::mcp: Tool called: query
+2025-10-10T18:28:47.331346Z  INFO mlql_server::mcp: Executing query: show me countries and their companies with GDP data
+2025-10-10T18:28:47.331465Z  INFO mlql_server::mcp: Database: Some("data/demo.duckdb")
+2025-10-10T18:28:47.412543Z DEBUG reqwest::connect: starting new connection: https://api.openai.com/
+2025-10-10T18:28:52.810699Z  INFO mlql_server::llm: LLM Response (attempt 1): {
+  "pipeline": {
+    "source": {
+      "type": "Table",
+      "name": "tree",
+      "alias": "t"
+    },
+    "ops": [
+      {
+        "op": "Join",
+        "source": {
+          "type": "Table",
+          "name": "companies",
+          "alias": "c"
+        },
+        "on": {
+          "type": "BinaryOp",
+          "op": "Eq",
+          "left": {"type": "Column", "col": {"table": "t", "column": "Country"}},
+          "right": {"type": "Column", "col": {"table": "c", "column": "Company"}}
+        },
+        "join_type": "Inner"
+      }
+    ]
+  }
+}
+2025-10-10T18:28:52.810941Z  INFO mlql_server::mcp: Generated IR: {
+  "source": {
+    "type": "Table",
+    "name": "tree",
+    "alias": "t"
+  },
+  "ops": [
+    {
+      "op": "Join",
+      "source": {
+        "type": "Table",
+        "name": "companies",
+        "alias": "c"
+      },
+      "on": {
+        "type": "BinaryOp",
+        "op": "Eq",
+        "left": {
+          "type": "Column",
+          "col": {
+            "table": "t",
+            "column": "Country"
+          }
+        },
+        "right": {
+          "type": "Column",
+          "col": {
+            "table": "c",
+            "column": "Company"
+          }
+        }
+      },
+      "join_type": "Inner"
+    }
+  ]
+}
+2025-10-10T18:28:52.820235Z  INFO mlql_duck: Generated SQL: SELECT * FROM "tree" AS "t" INNER JOIN companies AS c ON ("t"."Country" = "c"."Company")
+2025-10-10T18:28:52.823341Z  INFO mlql_server::query: Generated SQL: SELECT * FROM "tree" AS "t" INNER JOIN companies AS c ON ("t"."Country" = "c"."Company")
+2025-10-10T18:28:52.824914Z  INFO mlql_server::mcp: Execution info: SELECT * FROM "tree" AS "t" INNER JOIN companies AS c ON ("t"."Country" = "c"."Company")
+2025-10-10T18:28:52.824979Z  INFO mlql_server::mcp: Query results: 0 rows
+2025-10-10T18:29:02.770377Z  INFO mlql_server::mcp: Tool called: query
+2025-10-10T18:29:02.770499Z  INFO mlql_server::mcp: Executing query: join bank failures and companies tables
+2025-10-10T18:29:02.770561Z  INFO mlql_server::mcp: Database: Some("data/demo.duckdb")
+2025-10-10T18:29:07.291902Z  INFO mlql_server::llm: LLM Response (attempt 1): {
+  "pipeline": {
+    "source": {"type": "Table", "name": "bank_failures", "alias": "b"},
+    "ops": [
+      {
+        "op": "Join",
+        "source": {"type": "Table", "name": "companies", "alias": "c"},
+        "on": {
+          "type": "BinaryOp",
+          "op": "Eq",
+          "left": {"type": "Column", "col": {"table": "b", "column": "Bank"}},
+          "right": {"type": "Column", "col": {"table": "c", "column": "Company"}}
+        },
+        "join_type": "Inner"
+      }
+    ]
+  }
+}
+2025-10-10T18:29:07.292112Z  INFO mlql_server::mcp: Generated IR: {
+  "source": {
+    "type": "Table",
+    "name": "bank_failures",
+    "alias": "b"
+  },
+  "ops": [
+    {
+      "op": "Join",
+      "source": {
+        "type": "Table",
+        "name": "companies",
+        "alias": "c"
+      },
+      "on": {
+        "type": "BinaryOp",
+        "op": "Eq",
+        "left": {
+          "type": "Column",
+          "col": {
+            "table": "b",
+            "column": "Bank"
+          }
+        },
+        "right": {
+          "type": "Column",
+          "col": {
+            "table": "c",
+            "column": "Company"
+          }
+        }
+      },
+      "join_type": "Inner"
+    }
+  ]
+}
+2025-10-10T18:29:07.300848Z  INFO mlql_duck: Generated SQL: SELECT * FROM "bank_failures" AS "b" INNER JOIN companies AS c ON ("b"."Bank" = "c"."Company")
+2025-10-10T18:29:07.301996Z  INFO mlql_server::query: Generated SQL: SELECT * FROM "bank_failures" AS "b" INNER JOIN companies AS c ON ("b"."Bank" = "c"."Company")
+2025-10-10T18:29:07.303256Z  INFO mlql_server::mcp: Execution info: SELECT * FROM "bank_failures" AS "b" INNER JOIN companies AS c ON ("b"."Bank" = "c"."Company")
+2025-10-10T18:29:07.303292Z  INFO mlql_server::mcp: Query results: 0 rows
+2025-10-10T18:29:17.582108Z  INFO mlql_server::mcp: Tool called: query
+2025-10-10T18:29:17.582209Z  INFO mlql_server::mcp: Executing query: show bank failures from 2023
+2025-10-10T18:29:17.582229Z  INFO mlql_server::mcp: Database: Some("data/demo.duckdb")
+2025-10-10T18:29:20.760169Z  INFO mlql_server::llm: LLM Response (attempt 1): {
+  "pipeline": {
+    "source": {"type": "Table", "name": "bank_failures"},
+    "ops": [
+      {
+        "op": "Filter",
+        "condition": {
+          "type": "BinaryOp",
+          "op": "Eq",
+          "left": {"type": "Column", "col": {"column": "Date"}},
+          "right": {"type": "Literal", "value": "2023-01-01"}
+        }
+      }
+    ]
+  }
+}
+2025-10-10T18:29:20.760450Z  INFO mlql_server::mcp: Generated IR: {
+  "source": {
+    "type": "Table",
+    "name": "bank_failures"
+  },
+  "ops": [
+    {
+      "op": "Filter",
+      "condition": {
+        "type": "BinaryOp",
+        "op": "Eq",
+        "left": {
+          "type": "Column",
+          "col": {
+            "column": "Date"
+          }
+        },
+        "right": {
+          "type": "Literal",
+          "value": "2023-01-01"
+        }
+      }
+    }
+  ]
+}
+2025-10-10T18:29:20.773854Z  INFO mlql_duck: Generated SQL: SELECT * FROM "bank_failures" WHERE ("Date" = '2023-01-01')
+2025-10-10T18:29:20.775557Z  INFO mlql_server::query: Generated SQL: SELECT * FROM "bank_failures" WHERE ("Date" = '2023-01-01')
+2025-10-10T18:29:20.777280Z  INFO mlql_server::mcp: Execution info: SELECT * FROM "bank_failures" WHERE ("Date" = '2023-01-01')
+2025-10-10T18:29:20.777316Z  INFO mlql_server::mcp: Query results: 0 rows
+2025-10-10T18:29:30.145049Z  INFO mlql_server::mcp: Tool called: query
+2025-10-10T18:29:30.146086Z  INFO mlql_server::mcp: Executing query: show first 5 bank failures with their dates
+2025-10-10T18:29:30.146136Z  INFO mlql_server::mcp: Database: Some("data/demo.duckdb")
+2025-10-10T18:29:34.260691Z  INFO mlql_server::llm: LLM Response (attempt 1): {
+  "pipeline": {
+    "source": {"type": "Table", "name": "bank_failures"},
+    "ops": [
+      {
+        "op": "Select",
+        "projections": [
+          {"type": "Column", "col": {"column": "Bank"}},
+          {"type": "Column", "col": {"column": "Date"}}
+        ]
+      },
+      {
+        "op": "Take",
+        "limit": 5
+      }
+    ]
+  }
+}
+2025-10-10T18:29:34.261028Z  INFO mlql_server::mcp: Generated IR: {
+  "source": {
+    "type": "Table",
+    "name": "bank_failures"
+  },
+  "ops": [
+    {
+      "op": "Select",
+      "projections": [
+        {
+          "type": "Column",
+          "col": {
+            "column": "Bank"
+          }
+        },
+        {
+          "type": "Column",
+          "col": {
+            "column": "Date"
+          }
+        }
+      ]
+    },
+    {
+      "op": "Take",
+      "limit": 5
+    }
+  ]
+}
+2025-10-10T18:29:34.272933Z  INFO mlql_duck: Generated SQL: SELECT "Bank", "Date" FROM "bank_failures" LIMIT 5
+2025-10-10T18:29:34.273501Z  INFO mlql_server::query: Generated SQL: SELECT "Bank", "Date" FROM "bank_failures" LIMIT 5
+2025-10-10T18:29:34.275025Z  INFO mlql_server::mcp: Execution info: SELECT "Bank", "Date" FROM "bank_failures" LIMIT 5
+2025-10-10T18:29:34.275068Z  INFO mlql_server::mcp: Query results: 5 rows
+2025-10-10T18:29:46.206351Z  INFO mlql_server::mcp: Tool called: query
+2025-10-10T18:29:46.206419Z  INFO mlql_server::mcp: Executing query: show calendar data for January 2023
+2025-10-10T18:29:46.206439Z  INFO mlql_server::mcp: Database: Some("data/demo.duckdb")
+2025-10-10T18:29:48.962611Z  INFO mlql_server::llm: LLM Response (attempt 1): {
+  "pipeline": {
+    "source": {"type": "Table", "name": "calendar"},
+    "ops": [
+      {
+        "op": "Filter",
+        "condition": {
+          "type": "BinaryOp",
+          "op": "Eq",
+          "left": {"type": "Column", "col": {"column": "dt"}},
+          "right": {"type": "Literal", "value": "2023-01-01"}
+        }
+      }
+    ]
+  }
+}
+2025-10-10T18:29:48.962836Z  INFO mlql_server::mcp: Generated IR: {
+  "source": {
+    "type": "Table",
+    "name": "calendar"
+  },
+  "ops": [
+    {
+      "op": "Filter",
+      "condition": {
+        "type": "BinaryOp",
+        "op": "Eq",
+        "left": {
+          "type": "Column",
+          "col": {
+            "column": "dt"
+          }
+        },
+        "right": {
+          "type": "Literal",
+          "value": "2023-01-01"
+        }
+      }
+    }
+  ]
+}
+2025-10-10T18:29:48.971941Z  INFO mlql_duck: Generated SQL: SELECT * FROM "calendar" WHERE ("dt" = '2023-01-01')
+2025-10-10T18:29:48.972498Z  INFO mlql_server::query: Generated SQL: SELECT * FROM "calendar" WHERE ("dt" = '2023-01-01')
+2025-10-10T18:29:48.973816Z  INFO mlql_server::mcp: Execution info: SELECT * FROM "calendar" WHERE ("dt" = '2023-01-01')
+2025-10-10T18:29:48.973853Z  INFO mlql_server::mcp: Query results: 1 rows
+2025-10-10T18:30:08.593598Z  INFO mlql_server::mcp: Tool called: query
+2025-10-10T18:30:08.593657Z  INFO mlql_server::mcp: Executing query: show companies with their rank by PnL
+2025-10-10T18:30:08.593697Z  INFO mlql_server::mcp: Database: Some("data/demo.duckdb")
+2025-10-10T18:30:13.924766Z  INFO mlql_server::llm: LLM Response (attempt 1): {
+  "pipeline": {
+    "source": {"type": "Table", "name": "companies"},
+    "ops": [
+      {
+        "op": "Sort",
+        "keys": [{"expr": {"type": "Column", "col": {"column": "PnL"}}, "desc": true}]
+      },
+      {
+        "op": "Select",
+        "projections": [
+          {"type": "Column", "col": {"column": "Company"}},
+          {
+            "expr": {
+              "type": "BinaryOp",
+              "op": "Add",
+              "left": {"type": "Literal", "value": 1},
+              "right": {
+                "type": "BinaryOp",
+                "op": "Count",
+                "args": [{"type": "Column", "col": {"column": "PnL"}}]
+              }
+            },
+            "alias": "rank"
+          }
+        ]
+      }
+    ]
+  }
+}
+2025-10-10T18:30:13.925283Z  WARN mlql_server::llm: Failed to parse pipeline from wrapper: data did not match any variant of untagged enum Projection
+2025-10-10T18:30:13.925381Z  WARN mlql_server::llm: Attempted to parse: {"ops":[{"keys":[{"desc":true,"expr":{"col":{"column":"PnL"},"type":"Column"}}],"op":"Sort"},{"op":"Select","projections":[{"col":{"column":"Company"},"type":"Column"},{"alias":"rank","expr":{"left":{"type":"Literal","value":1},"op":"Add","right":{"args":[{"col":{"column":"PnL"},"type":"Column"}],"op":"Count","type":"BinaryOp"},"type":"BinaryOp"}}]}],"source":{"name":"companies","type":"Table"}}
+2025-10-10T18:30:13.925546Z  WARN mlql_server::llm: Parse attempt 1 failed, sending feedback to LLM
+2025-10-10T18:30:19.528071Z  INFO mlql_server::llm: LLM Response (attempt 2): {
+  "pipeline": {
+    "source": {"type": "Table", "name": "companies"},
+    "ops": [
+      {
+        "op": "Sort",
+        "keys": [{"expr": {"type": "Column", "col": {"column": "PnL"}}, "desc": true}]
+      },
+      {
+        "op": "Select",
+        "projections": [
+          {"type": "Column", "col": {"column": "Company"}},
+          {
+            "expr": {
+              "type": "BinaryOp",
+              "op": "Add",
+              "left": {"type": "Literal", "value": 1},
+              "right": {"type": "Column", "col": {"column": "PnL"}}
+            },
+            "alias": "rank"
+          }
+        ]
+      }
+    ]
+  }
+}
+2025-10-10T18:30:19.528548Z  INFO mlql_server::mcp: Generated IR: {
+  "source": {
+    "type": "Table",
+    "name": "companies"
+  },
+  "ops": [
+    {
+      "op": "Sort",
+      "keys": [
+        {
+          "expr": {
+            "type": "Column",
+            "col": {
+              "column": "PnL"
+            }
+          },
+          "desc": true
+        }
+      ]
+    },
+    {
+      "op": "Select",
+      "projections": [
+        {
+          "type": "Column",
+          "col": {
+            "column": "Company"
+          }
+        },
+        {
+          "expr": {
+            "type": "BinaryOp",
+            "op": "Add",
+            "left": {
+              "type": "Literal",
+              "value": 1
+            },
+            "right": {
+              "type": "Column",
+              "col": {
+                "column": "PnL"
+              }
+            }
+          },
+          "alias": "rank"
+        }
+      ]
+    }
+  ]
+}
+2025-10-10T18:30:19.540403Z  INFO mlql_duck: Generated SQL: WITH
+  cte_1 AS (SELECT "Company", (1 + "PnL") AS "rank" FROM "companies")
+SELECT * FROM cte_1 ORDER BY "PnL" DESC
+2025-10-10T18:30:19.543657Z ERROR mlql_server::mcp: Failed to execute query: Database error: Binder Error: Referenced column "PnL" not found in FROM clause!
+Candidate bindings: "rank"
+
+LINE 3: SELECT * FROM cte_1 ORDER BY "PnL" DESC
+                                     ^
+2025-10-10T18:30:19.543765Z ERROR mlql_server::mcp: IR that caused error: {
+  "source": {
+    "type": "Table",
+    "name": "companies"
+  },
+  "ops": [
+    {
+      "op": "Sort",
+      "keys": [
+        {
+          "expr": {
+            "type": "Column",
+            "col": {
+              "column": "PnL"
+            }
+          },
+          "desc": true
+        }
+      ]
+    },
+    {
+      "op": "Select",
+      "projections": [
+        {
+          "type": "Column",
+          "col": {
+            "column": "Company"
+          }
+        },
+        {
+          "expr": {
+            "type": "BinaryOp",
+            "op": "Add",
+            "left": {
+              "type": "Literal",
+              "value": 1
+            },
+            "right": {
+              "type": "Column",
+              "col": {
+                "column": "PnL"
+              }
+            }
+          },
+          "alias": "rank"
+        }
+      ]
+    }
+  ]
+}
+2025-10-10T18:30:27.565529Z  INFO mlql_server::mcp: Tool called: query
+2025-10-10T18:30:27.565578Z  INFO mlql_server::mcp: Executing query: number the companies 1 through 8 ordered by PnL descending
+2025-10-10T18:30:27.565592Z  INFO mlql_server::mcp: Database: Some("data/demo.duckdb")
+2025-10-10T18:30:34.545687Z  INFO mlql_server::llm: LLM Response (attempt 1): {
+  "pipeline": {
+    "source": {
+      "type": "Table",
+      "name": "companies"
+    },
+    "ops": [
+      {
+        "op": "Sort",
+        "keys": [
+          {
+            "expr": {
+              "type": "Column",
+              "col": {
+                "column": "PnL"
+              }
+            },
+            "desc": true
+          }
+        ]
+      },
+      {
+        "op": "Select",
+        "projections": [
+          {
+            "expr": {
+              "type": "Column",
+              "col": {
+                "column": "Company"
+              }
+            },
+            "alias": "Company"
+          },
+          {
+            expr: {
+              type: "BinaryOp",
+              op: "Add",
+              left: {
+                type: "Literal",
+                value: 1
+              },
+              right: {
+                type: "Column",
+                col: {
+                  column: "row_number"
+                }
+              }
+            },
+            alias: "Number"
+          }
+        ]
+      }
+    ]
+  }
+}
+2025-10-10T18:30:34.546006Z  WARN mlql_server::llm: Parse attempt 1 failed, sending feedback to LLM
+2025-10-10T18:30:40.302354Z  INFO mlql_server::llm: LLM Response (attempt 2): {
+  "pipeline": {
+    "source": {
+      "type": "Table",
+      "name": "companies"
+    },
+    "ops": [
+      {
+        "op": "Sort",
+        "keys": [
+          {
+            "expr": {
+              "type": "Column",
+              "col": {
+                "column": "PnL"
+              }
+            },
+            "desc": true
+          }
+        ]
+      },
+      {
+        "op": "Select",
+        "projections": [
+          {
+            "type": "Column",
+            "col": {
+              "column": "Company"
+            }
+          },
+          {
+            "expr": {
+              "type": "BinaryOp",
+              "op": "Add",
+              "left": {
+                "type": "Literal",
+                "value": 1
+              },
+              "right": {
+                "type": "Column",
+                "col": {
+                  "column": "row_number"
+                }
+              }
+            },
+            "alias": "Number"
+          }
+        ]
+      }
+    ]
+  }
+}
+2025-10-10T18:30:40.303125Z  INFO mlql_server::mcp: Generated IR: {
+  "source": {
+    "type": "Table",
+    "name": "companies"
+  },
+  "ops": [
+    {
+      "op": "Sort",
+      "keys": [
+        {
+          "expr": {
+            "type": "Column",
+            "col": {
+              "column": "PnL"
+            }
+          },
+          "desc": true
+        }
+      ]
+    },
+    {
+      "op": "Select",
+      "projections": [
+        {
+          "type": "Column",
+          "col": {
+            "column": "Company"
+          }
+        },
+        {
+          "expr": {
+            "type": "BinaryOp",
+            "op": "Add",
+            "left": {
+              "type": "Literal",
+              "value": 1
+            },
+            "right": {
+              "type": "Column",
+              "col": {
+                "column": "row_number"
+              }
+            }
+          },
+          "alias": "Number"
+        }
+      ]
+    }
+  ]
+}
+2025-10-10T18:30:40.314033Z  INFO mlql_duck: Generated SQL: WITH
+  cte_1 AS (SELECT "Company", (1 + "row_number") AS "Number" FROM "companies")
+SELECT * FROM cte_1 ORDER BY "PnL" DESC
+2025-10-10T18:30:40.316492Z ERROR mlql_server::mcp: Failed to execute query: Database error: Binder Error: Referenced column "row_number" not found in FROM clause!
+Candidate bindings: "Revenue"
+
+LINE 2:   cte_1 AS (SELECT "Company", (1 + "row_number") AS "Number" FROM "companies")
+                                           ^
+2025-10-10T18:30:40.316631Z ERROR mlql_server::mcp: IR that caused error: {
+  "source": {
+    "type": "Table",
+    "name": "companies"
+  },
+  "ops": [
+    {
+      "op": "Sort",
+      "keys": [
+        {
+          "expr": {
+            "type": "Column",
+            "col": {
+              "column": "PnL"
+            }
+          },
+          "desc": true
+        }
+      ]
+    },
+    {
+      "op": "Select",
+      "projections": [
+        {
+          "type": "Column",
+          "col": {
+            "column": "Company"
+          }
+        },
+        {
+          "expr": {
+            "type": "BinaryOp",
+            "op": "Add",
+            "left": {
+              "type": "Literal",
+              "value": 1
+            },
+            "right": {
+              "type": "Column",
+              "col": {
+                "column": "row_number"
+              }
+            }
+          },
+          "alias": "Number"
+        }
+      ]
+    }
+  ]
+}
+2025-10-10T18:31:01.720403Z  INFO mlql_server::mcp: Tool called: query
+2025-10-10T18:31:01.720465Z  INFO mlql_server::mcp: Executing query: show companies where revenue is above the average revenue
+2025-10-10T18:31:01.720483Z  INFO mlql_server::mcp: Database: Some("data/demo.duckdb")
+2025-10-10T18:31:05.986399Z  INFO mlql_server::llm: LLM Response (attempt 1): {
+  "pipeline": {
+    "source": {
+      "type": "Table",
+      "name": "companies"
+    },
+    "ops": [
+      {
+        "op": "Filter",
+        "condition": {
+          "type": "BinaryOp",
+          "op": "Gt",
+          "left": {
+            "type": "Column",
+            "col": {
+              "column": "Revenue"
+            }
+          },
+          "right": {
+            "type": "BinaryOp",
+            "op": "Avg",
+            "left": {
+              "type": "Column",
+              "col": {
+                "column": "Revenue"
+              }
+            },
+            "right": {}
+          }
+        }
+      }
+    ]
+  }
+}
+2025-10-10T18:31:05.986850Z  WARN mlql_server::llm: Failed to parse pipeline from wrapper: unknown variant `Avg`, expected one of `Add`, `Sub`, `Mul`, `Div`, `Mod`, `Eq`, `Ne`, `Lt`, `Le`, `Gt`, `Ge`, `And`, `Or`, `Like`, `ILike`
+2025-10-10T18:31:05.986940Z  WARN mlql_server::llm: Attempted to parse: {"ops":[{"condition":{"left":{"col":{"column":"Revenue"},"type":"Column"},"op":"Gt","right":{"left":{"col":{"column":"Revenue"},"type":"Column"},"op":"Avg","right":{},"type":"BinaryOp"},"type":"BinaryOp"},"op":"Filter"}],"source":{"name":"companies","type":"Table"}}
+2025-10-10T18:31:05.987136Z  WARN mlql_server::llm: Parse attempt 1 failed, sending feedback to LLM
+2025-10-10T18:31:10.395877Z  INFO mlql_server::llm: LLM Response (attempt 2): {
+  "pipeline": {
+    "source": {
+      "type": "Table",
+      "name": "companies"
+    },
+    "ops": [
+      {
+        "op": "Filter",
+        "condition": {
+          "type": "BinaryOp",
+          "op": "Gt",
+          "left": {
+            "type": "Column",
+            "col": {
+              "column": "Revenue"
+            }
+          },
+          "right": {
+            "type": "BinaryOp",
+            "op": "Ge",
+            "left": {
+              "type": "Column",
+              "col": {
+                "column": "Revenue"
+              }
+            },
+            "right": {
+              "type": "Literal",
+              "value": 0
+            }
+          }
+        }
+      }
+    ]
+  }
+}
+2025-10-10T18:31:10.396335Z  INFO mlql_server::mcp: Generated IR: {
+  "source": {
+    "type": "Table",
+    "name": "companies"
+  },
+  "ops": [
+    {
+      "op": "Filter",
+      "condition": {
+        "type": "BinaryOp",
+        "op": "Gt",
+        "left": {
+          "type": "Column",
+          "col": {
+            "column": "Revenue"
+          }
+        },
+        "right": {
+          "type": "BinaryOp",
+          "op": "Ge",
+          "left": {
+            "type": "Column",
+            "col": {
+              "column": "Revenue"
+            }
+          },
+          "right": {
+            "type": "Literal",
+            "value": 0
+          }
+        }
+      }
+    }
+  ]
+}
+2025-10-10T18:31:10.408026Z  INFO mlql_duck: Generated SQL: SELECT * FROM "companies" WHERE ("Revenue" > ("Revenue" >= 0))
+2025-10-10T18:31:10.409607Z ERROR mlql_server::mcp: Failed to execute query: Database error: Binder Error: Cannot compare values of type DOUBLE and type BOOLEAN - an explicit cast is required
+
+LINE 1: SELECT * FROM "companies" WHERE ("Revenue" > ("Revenue" >= 0))
+                                                   ^
+2025-10-10T18:31:10.409685Z ERROR mlql_server::mcp: IR that caused error: {
+  "source": {
+    "type": "Table",
+    "name": "companies"
+  },
+  "ops": [
+    {
+      "op": "Filter",
+      "condition": {
+        "type": "BinaryOp",
+        "op": "Gt",
+        "left": {
+          "type": "Column",
+          "col": {
+            "column": "Revenue"
+          }
+        },
+        "right": {
+          "type": "BinaryOp",
+          "op": "Ge",
+          "left": {
+            "type": "Column",
+            "col": {
+              "column": "Revenue"
+            }
+          },
+          "right": {
+            "type": "Literal",
+            "value": 0
+          }
+        }
+      }
+    }
+  ]
+}
+2025-10-10T18:31:39.980127Z  INFO mlql_server::mcp: Tool called: query
+2025-10-10T18:31:39.980217Z  INFO mlql_server::mcp: Executing query: first get the top 3 countries by GDP, then show their population density
+2025-10-10T18:31:39.980241Z  INFO mlql_server::mcp: Database: Some("data/demo.duckdb")
+2025-10-10T18:31:48.686255Z  INFO mlql_server::llm: LLM Response (attempt 1): {
+  "pipeline": {
+    "source": {
+      "type": "Table",
+      "name": "country_stats_scatter"
+    },
+    "ops": [
+      {
+        "op": "Sort",
+        "keys": [
+          {
+            "expr": {
+              "type": "Column",
+              "col": {
+                "column": "GDP"
+              }
+            },
+            "desc": true
+          }
+        ]
+      },
+      {
+        "op": "Take",
+        "limit": 3
+      },
+      {
+        "op": "Join",
+        "source": {
+          "type": "Table",
+          "name": "japan_population",
+          "alias": "jp"
+        },
+        "on": {
+          "type": "BinaryOp",
+          "op": "Eq",
+          "left": {
+            "type": "Column",
+            "col": {
+              "table": "country_stats_scatter",
+              "column": "Country"
+            }
+          },
+          "right": {
+            "type": "Column",
+            "col": {
+              "table": "jp",
+              "column": "Country"
+            }
+          }
+        },
+        "join_type": "Inner"
+      },
+      {
+        "op": "Select",
+        "projections": [
+          {
+            "expr": {
+              "type": "Column",
+              "col": {
+                table: "country_stats_scatter",
+                column: "Country"
+              }
+            },
+            "alias": "Country"
+          },
+          {
+            expr: {
+              type: "BinaryOp",
+              op: "Div",
+              left: {
+                type: "Column",
+                col: {
+                  table: "jp",
+                  column: "Population"
+                }
+              },
+              right: {
+                type: "Column",
+                col: {
+                  table: "jp",
+                  column: "Area"
+                }
+              }
+            },
+            alias: "PopulationDensity"
+          }
+        ]
+      }
+    ]
+  }
+}
+2025-10-10T18:31:48.686667Z  WARN mlql_server::llm: Parse attempt 1 failed, sending feedback to LLM
+2025-10-10T18:32:00.605109Z  INFO mlql_server::llm: LLM Response (attempt 2): {
+  "pipeline": {
+    "source": {
+      "type": "Table",
+      "name": "country_stats_scatter"
+    },
+    "ops": [
+      {
+        "op": "Sort",
+        "keys": [
+          {
+            "expr": {
+              "type": "Column",
+              "col": {
+                "column": "GDP"
+              }
+            },
+            "desc": true
+          }
+        ]
+      },
+      {
+        "op": "Take",
+        "limit": 3
+      },
+      {
+        "op": "Join",
+        "source": {
+          "type": "Table",
+          "name": "japan_population",
+          "alias": "jp"
+        },
+        "on": {
+          "type": "BinaryOp",
+          "op": "Eq",
+          "left": {
+            "type": "Column",
+            "col": {
+              "table": "country_stats_scatter",
+              "column": "Country"
+            }
+          },
+          "right": {
+            "type": "Column",
+            "col": {
+              "table": "jp",
+              "column": "Country"
+            }
+          }
+        },
+        "join_type": "Inner"
+      },
+      {
+        "op": "Select",
+        "projections": [
+          {
+            "expr": {
+              "type": "Column",
+              "col": {
+                "table": "country_stats_scatter",
+                "column": "Country"
+              }
+            },
+            "alias": "Country"
+          },
+          {
+            "expr": {
+              "type": "BinaryOp",
+              "op": "Div",
+              "left": {
+                "type": "Column",
+                "col": {
+                  "table": "jp",
+                  "column": "Population"
+                }
+              },
+              "right": {
+                "type": "Column",
+                "col": {
+                  "table": "jp",
+                  "column": "Area"
+                }
+              }
+            },
+            "alias": "PopulationDensity"
+          }
+        ]
+      }
+    ]
+  }
+}
+2025-10-10T18:32:00.605789Z  INFO mlql_server::mcp: Generated IR: {
+  "source": {
+    "type": "Table",
+    "name": "country_stats_scatter"
+  },
+  "ops": [
+    {
+      "op": "Sort",
+      "keys": [
+        {
+          "expr": {
+            "type": "Column",
+            "col": {
+              "column": "GDP"
+            }
+          },
+          "desc": true
+        }
+      ]
+    },
+    {
+      "op": "Take",
+      "limit": 3
+    },
+    {
+      "op": "Join",
+      "source": {
+        "type": "Table",
+        "name": "japan_population",
+        "alias": "jp"
+      },
+      "on": {
+        "type": "BinaryOp",
+        "op": "Eq",
+        "left": {
+          "type": "Column",
+          "col": {
+            "table": "country_stats_scatter",
+            "column": "Country"
+          }
+        },
+        "right": {
+          "type": "Column",
+          "col": {
+            "table": "jp",
+            "column": "Country"
+          }
+        }
+      },
+      "join_type": "Inner"
+    },
+    {
+      "op": "Select",
+      "projections": [
+        {
+          "expr": {
+            "type": "Column",
+            "col": {
+              "table": "country_stats_scatter",
+              "column": "Country"
+            }
+          },
+          "alias": "Country"
+        },
+        {
+          "expr": {
+            "type": "BinaryOp",
+            "op": "Div",
+            "left": {
+              "type": "Column",
+              "col": {
+                "table": "jp",
+                "column": "Population"
+              }
+            },
+            "right": {
+              "type": "Column",
+              "col": {
+                "table": "jp",
+                "column": "Area"
+              }
+            }
+          },
+          "alias": "PopulationDensity"
+        }
+      ]
+    }
+  ]
+}
+2025-10-10T18:32:00.617277Z  INFO mlql_duck: Generated SQL: WITH
+  cte_1 AS (SELECT "country_stats_scatter"."Country" AS "Country", ("jp"."Population" / "jp"."Area") AS "PopulationDensity" FROM "country_stats_scatter" INNER JOIN japan_population AS jp ON ("country_stats_scatter"."Country" = "jp"."Country"))
+SELECT * FROM cte_1 ORDER BY "GDP" DESC LIMIT 3
+2025-10-10T18:32:00.619148Z ERROR mlql_server::mcp: Failed to execute query: Database error: Binder Error: Table "jp" does not have a column named "Country"
+
+Candidate bindings: : "Age"
+
+LINE 2: ...n_population AS jp ON ("country_stats_scatter"."Country" = "jp"."Country"))
+                                                                      ^
+2025-10-10T18:32:00.619295Z ERROR mlql_server::mcp: IR that caused error: {
+  "source": {
+    "type": "Table",
+    "name": "country_stats_scatter"
+  },
+  "ops": [
+    {
+      "op": "Sort",
+      "keys": [
+        {
+          "expr": {
+            "type": "Column",
+            "col": {
+              "column": "GDP"
+            }
+          },
+          "desc": true
+        }
+      ]
+    },
+    {
+      "op": "Take",
+      "limit": 3
+    },
+    {
+      "op": "Join",
+      "source": {
+        "type": "Table",
+        "name": "japan_population",
+        "alias": "jp"
+      },
+      "on": {
+        "type": "BinaryOp",
+        "op": "Eq",
+        "left": {
+          "type": "Column",
+          "col": {
+            "table": "country_stats_scatter",
+            "column": "Country"
+          }
+        },
+        "right": {
+          "type": "Column",
+          "col": {
+            "table": "jp",
+            "column": "Country"
+          }
+        }
+      },
+      "join_type": "Inner"
+    },
+    {
+      "op": "Select",
+      "projections": [
+        {
+          "expr": {
+            "type": "Column",
+            "col": {
+              "table": "country_stats_scatter",
+              "column": "Country"
+            }
+          },
+          "alias": "Country"
+        },
+        {
+          "expr": {
+            "type": "BinaryOp",
+            "op": "Div",
+            "left": {
+              "type": "Column",
+              "col": {
+                "table": "jp",
+                "column": "Population"
+              }
+            },
+            "right": {
+              "type": "Column",
+              "col": {
+                "table": "jp",
+                "column": "Area"
+              }
+            }
+          },
+          "alias": "PopulationDensity"
+        }
+      ]
+    }
+  ]
+}
+2025-10-10T18:32:32.632629Z  INFO mlql_server::mcp: Tool called: query
+2025-10-10T18:32:32.632715Z  INFO mlql_server::mcp: Executing query: show states with more than 20 bank failures
+2025-10-10T18:32:32.632733Z  INFO mlql_server::mcp: Database: Some("data/demo.duckdb")
+2025-10-10T18:32:38.234429Z  INFO mlql_server::llm: LLM Response (attempt 1): {
+  "pipeline": {
+    "source": {
+      "type": "Table",
+      "name": "bank_failures"
+    },
+    "ops": [
+      {
+        "op": "GroupBy",
+        "keys": [{"column": "State"}],
+        "aggs": {
+          "total_failures": {
+            "func": "count",
+            "args": []
+          }
+        }
+      },
+      {
+        "op": "Filter",
+        "condition": {
+          "type": "BinaryOp",
+          "op": "Gt",
+          "left": {"type": "Column", "col": {"column": "total_failures"}},
+          "right": {"type": "Literal", "value": 20}
+        }
+      }
+    ]
+  }
+}
+2025-10-10T18:32:38.235203Z  INFO mlql_server::mcp: Generated IR: {
+  "source": {
+    "type": "Table",
+    "name": "bank_failures"
+  },
+  "ops": [
+    {
+      "op": "GroupBy",
+      "keys": [
+        {
+          "column": "State"
+        }
+      ],
+      "aggs": {
+        "total_failures": {
+          "func": "count"
+        }
+      }
+    },
+    {
+      "op": "Filter",
+      "condition": {
+        "type": "BinaryOp",
+        "op": "Gt",
+        "left": {
+          "type": "Column",
+          "col": {
+            "column": "total_failures"
+          }
+        },
+        "right": {
+          "type": "Literal",
+          "value": 20
+        }
+      }
+    }
+  ]
+}
+2025-10-10T18:32:38.247172Z  INFO mlql_duck: Generated SQL: SELECT "State", count(*) AS total_failures FROM "bank_failures" GROUP BY "State" HAVING ("total_failures" > 20)
+2025-10-10T18:32:38.250531Z  INFO mlql_server::query: Generated SQL: SELECT "State", count(*) AS total_failures FROM "bank_failures" GROUP BY "State" HAVING ("total_failures" > 20)
+2025-10-10T18:32:38.252082Z  INFO mlql_server::mcp: Execution info: SELECT "State", count(*) AS total_failures FROM "bank_failures" GROUP BY "State" HAVING ("total_failures" > 20)
+2025-10-10T18:32:38.252134Z  INFO mlql_server::mcp: Query results: 5 rows
+2025-10-10T18:33:10.755080Z  INFO mlql_server::mcp: Tool called: query
+2025-10-10T18:33:10.755165Z  INFO mlql_server::mcp: Executing query: categorize companies as small, medium, or large based on revenue
+2025-10-10T18:33:10.755188Z  INFO mlql_server::mcp: Database: Some("data/demo.duckdb")
+2025-10-10T18:33:22.490373Z  INFO mlql_server::llm: LLM Response (attempt 1): {
+  "pipeline": {
+    "source": {
+      "type": "Table",
+      "name": "companies"
+    },
+    "ops": [
+      {
+        "op": "Select",
+        "projections": [
+          {
+            "expr": {
+              "type": "BinaryOp",
+              "op": "Case",
+              "left": {
+                "type": "Column",
+                "col": {"column": "Revenue"}
+              },
+              "cases": [
+                {
+                  "condition": {
+                    "type": "BinaryOp",
+                    "op": "Lt",
+                    "left": {
+                      "type": "Column",
+                      "col": {"column": "Revenue"}
+                    },
+                    "right": {"type": "Literal", "value": 10000}
+                  },
+                  "result": {"type": "Literal", "value": "small"}
+                },
+                {
+                  "condition": {
+                    "type": "BinaryOp",
+                    "op": "And",
+                    "left": {
+                      "type": "BinaryOp",
+                      "op": "Ge",
+                      "left": {
+                        "type": "Column",
+                        "col": {"column": "Revenue"}
+                      },
+                      "right": {"type": "Literal", "value": 10000}
+                    },
+                    "right": {
+                      "type": "BinaryOp",
+                      "op": "Lt",
+                      "left": {
+                        "type": "Column",
+                        "col": {"column": "Revenue"}
+                      },
+                      "right": {"type": "Literal", "value": 50000}
+                    }
+                  },
+                  "result": {"type": "Literal", "value": "medium"}
+                }
+              ],
+              "default": {"type": "Literal", "value": "large"}
+            },
+            "alias": "company_size"
+          },
+          {"type": "Column", "col": {"column": "Company"}}
+        ]
+      }
+    ]
+  }
+}
+2025-10-10T18:33:22.490835Z  WARN mlql_server::llm: Failed to parse pipeline from wrapper: data did not match any variant of untagged enum Projection
+2025-10-10T18:33:22.490868Z  WARN mlql_server::llm: Attempted to parse: {"ops":[{"op":"Select","projections":[{"alias":"company_size","expr":{"cases":[{"condition":{"left":{"col":{"column":"Revenue"},"type":"Column"},"op":"Lt","right":{"type":"Literal","value":10000},"type":"BinaryOp"},"result":{"type":"Literal","value":"small"}},{"condition":{"left":{"left":{"col":{"column":"Revenue"},"type":"Column"},"op":"Ge","right":{"type":"Literal","value":10000},"type":"BinaryOp"},"op":"And","right":{"left":{"col":{"column":"Revenue"},"type":"Column"},"op":"Lt","right":{"type":"Literal","value":50000},"type":"BinaryOp"},"type":"BinaryOp"},"result":{"type":"Literal","value":"medium"}}],"default":{"type":"Literal","value":"large"},"left":{"col":{"column":"Revenue"},"type":"Column"},"op":"Case","type":"BinaryOp"}},{"col":{"column":"Company"},"type":"Column"}]}],"source":{"name":"companies","type":"Table"}}
+2025-10-10T18:33:22.491148Z  WARN mlql_server::llm: Parse attempt 1 failed, sending feedback to LLM
+2025-10-10T18:33:33.124303Z  INFO mlql_server::llm: LLM Response (attempt 2): {
+  "pipeline": {
+    "source": {
+      "type": "Table",
+      "name": "companies"
+    },
+    "ops": [
+      {
+        "op": "Select",
+        "projections": [
+          {
+            "expr": {
+              "type": "BinaryOp",
+              "op": "Case",
+              "left": {
+                "type": "Column",
+                "col": {"column": "Revenue"}
+              },
+              "cases": [
+                {
+                  "condition": {
+                    "type": "BinaryOp",
+                    "op": "Lt",
+                    "left": {
+                      "type": "Column",
+                      "col": {"column": "Revenue"}
+                    },
+                    "right": {"type": "Literal", "value": 10000}
+                  },
+                  "result": {"type": "Literal", "value": "small"}
+                },
+                {
+                  "condition": {
+                    "type": "BinaryOp",
+                    "op": "And",
+                    "left": {
+                      "type": "BinaryOp",
+                      "op": "Ge",
+                      "left": {
+                        "type": "Column",
+                        "col": {"column": "Revenue"}
+                      },
+                      "right": {"type": "Literal", "value": 10000}
+                    },
+                    "right": {
+                      "type": "BinaryOp",
+                      "op": "Lt",
+                      "left": {
+                        "type": "Column",
+                        "col": {"column": "Revenue"}
+                      },
+                      "right": {"type": "Literal", "value": 50000}
+                    }
+                  },
+                  "result": {"type": "Literal", "value": "medium"}
+                }
+              ],
+              "default": {"type": "Literal", "value": "large"}
+            },
+            "alias": "company_size"
+          },
+          {
+            "type": "Column",
+            "col": {"column": "Company"}
+          }
+        ]
+      }
+    ]
+  }
+}
+2025-10-10T18:33:33.124755Z  WARN mlql_server::llm: Failed to parse pipeline from wrapper: data did not match any variant of untagged enum Projection
+2025-10-10T18:33:33.124789Z  WARN mlql_server::llm: Attempted to parse: {"ops":[{"op":"Select","projections":[{"alias":"company_size","expr":{"cases":[{"condition":{"left":{"col":{"column":"Revenue"},"type":"Column"},"op":"Lt","right":{"type":"Literal","value":10000},"type":"BinaryOp"},"result":{"type":"Literal","value":"small"}},{"condition":{"left":{"left":{"col":{"column":"Revenue"},"type":"Column"},"op":"Ge","right":{"type":"Literal","value":10000},"type":"BinaryOp"},"op":"And","right":{"left":{"col":{"column":"Revenue"},"type":"Column"},"op":"Lt","right":{"type":"Literal","value":50000},"type":"BinaryOp"},"type":"BinaryOp"},"result":{"type":"Literal","value":"medium"}}],"default":{"type":"Literal","value":"large"},"left":{"col":{"column":"Revenue"},"type":"Column"},"op":"Case","type":"BinaryOp"}},{"col":{"column":"Company"},"type":"Column"}]}],"source":{"name":"companies","type":"Table"}}
+2025-10-10T18:33:33.124949Z  WARN mlql_server::llm: Parse attempt 2 failed, sending feedback to LLM
+2025-10-10T18:33:46.928956Z  INFO mlql_server::llm: LLM Response (attempt 3): {
+  "pipeline": {
+    "source": {
+      "type": "Table",
+      "name": "companies"
+    },
+    "ops": [
+      {
+        "op": "Select",
+        "projections": [
+          {
+            "expr": {
+              "type": "BinaryOp",
+              "op": "Case",
+              "left": {
+                "type": "Column",
+                "col": {
+                  "column": "Revenue"
+                }
+              },
+              "cases": [
+                {
+                  "condition": {
+                    "type": "BinaryOp",
+                    "op": "Lt",
+                    "left": {
+                      "type": "Column",
+                      "col": {
+                        "column": "Revenue"
+                      }
+                    },
+                    "right": {
+                      "type": "Literal",
+                      "value": 10000
+                    }
+                  },
+                  "result": {
+                    "type": "Literal",
+                    "value": "small"
+                  }
+                },
+                {
+                  "condition": {
+                    "type": "BinaryOp",
+                    "op": "And",
+                    "left": {
+                      "type": "BinaryOp",
+                      "op": "Ge",
+                      "left": {
+                        "type": "Column",
+                        "col": {
+                          "column": "Revenue"
+                        }
+                      },
+                      "right": {
+                        "type": "Literal",
+                        "value": 10000
+                      }
+                    },
+                    "right": {
+                      "type": "BinaryOp",
+                      "op": "Lt",
+                      "left": {
+                        "type": "Column",
+                        "col": {
+                          "column": "Revenue"
+                        }
+                      },
+                      "right": {
+                        "type": "Literal",
+                        "value": 50000
+                      }
+                    }
+                  },
+                  "result": {
+                    "type": "Literal",
+                    "value": "medium"
+                  }
+                }
+              ],
+              "default": {
+                "type": "Literal",
+                "value": "large"
+              }
+            },
+            "alias": "company_size"
+          },
+          {
+            "type": "Column",
+            "col": {
+              "column": "Company"
+            }
+          }
+        ]
+      }
+    ]
+  }
+}
+2025-10-10T18:33:46.929463Z  WARN mlql_server::llm: Failed to parse pipeline from wrapper: data did not match any variant of untagged enum Projection
+2025-10-10T18:33:46.929507Z  WARN mlql_server::llm: Attempted to parse: {"ops":[{"op":"Select","projections":[{"alias":"company_size","expr":{"cases":[{"condition":{"left":{"col":{"column":"Revenue"},"type":"Column"},"op":"Lt","right":{"type":"Literal","value":10000},"type":"BinaryOp"},"result":{"type":"Literal","value":"small"}},{"condition":{"left":{"left":{"col":{"column":"Revenue"},"type":"Column"},"op":"Ge","right":{"type":"Literal","value":10000},"type":"BinaryOp"},"op":"And","right":{"left":{"col":{"column":"Revenue"},"type":"Column"},"op":"Lt","right":{"type":"Literal","value":50000},"type":"BinaryOp"},"type":"BinaryOp"},"result":{"type":"Literal","value":"medium"}}],"default":{"type":"Literal","value":"large"},"left":{"col":{"column":"Revenue"},"type":"Column"},"op":"Case","type":"BinaryOp"}},{"col":{"column":"Company"},"type":"Column"}]}],"source":{"name":"companies","type":"Table"}}
+2025-10-10T18:33:46.929736Z ERROR mlql_server::mcp: Failed to convert NL to IR: Failed to parse MLQL IR after 3 attempts. Response: {
+  "pipeline": {
+    "source": {
+      "type": "Table",
+      "name": "companies"
+    },
+    "ops": [
+      {
+        "op": "Select",
+        "projections": [
+          {
+            "expr": {
+              "type": "BinaryOp",
+              "op": "Case",
+              "left": {
+                "type": "Column",
+                "col": {
+                  "column": "Revenue"
+                }
+              },
+              "cases": [
+                {
+                  "condition": {
+                    "type": "BinaryOp",
+                    "op": "Lt",
+                    "left": {
+                      "type": "Column",
+                      "col": {
+                        "column": "Revenue"
+                      }
+                    },
+                    "right": {
+                      "type": "Literal",
+                      "value": 10000
+                    }
+                  },
+                  "result": {
+                    "type": "Literal",
+                    "value": "small"
+                  }
+                },
+                {
+                  "condition": {
+                    "type": "BinaryOp",
+                    "op": "And",
+                    "left": {
+                      "type": "BinaryOp",
+                      "op": "Ge",
+                      "left": {
+                        "type": "Column",
+                        "col": {
+                          "column": "Revenue"
+                        }
+                      },
+                      "right": {
+                        "type": "Literal",
+                        "value": 10000
+                      }
+                    },
+                    "right": {
+                      "type": "BinaryOp",
+                      "op": "Lt",
+                      "left": {
+                        "type": "Column",
+                        "col": {
+                          "column": "Revenue"
+                        }
+                      },
+                      "right": {
+                        "type": "Literal",
+                        "value": 50000
+                      }
+                    }
+                  },
+                  "result": {
+                    "type": "Literal",
+                    "value": "medium"
+                  }
+                }
+              ],
+              "default": {
+                "type": "Literal",
+                "value": "large"
+              }
+            },
+            "alias": "company_size"
+          },
+          {
+            "type": "Column",
+            "col": {
+              "column": "Company"
+            }
+          }
+        ]
+      }
+    ]
+  }
+}
