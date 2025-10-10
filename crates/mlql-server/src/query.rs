@@ -73,6 +73,9 @@ pub async fn execute_ir(
     // Get the actual SQL that was executed
     let sql = result.sql.clone().unwrap_or_else(|| "No SQL generated".to_string());
 
+    // Log the generated SQL
+    tracing::info!("Generated SQL: {}", sql);
+
     // Convert result to JSON
     let json_result = result_to_json(&result)?;
 
@@ -136,7 +139,7 @@ pub async fn execute_ir_substrait(
             tracing::error!("JSON serialization failed: {}", e);
             format!("JSON serialization failed: {}", e)
         })?;
-    tracing::debug!("Plan serialized: {} chars", plan_json.len());
+    tracing::info!("Generated Substrait JSON ({} chars): {}", plan_json.len(), plan_json);
 
     // 8. Execute via from_substrait_json() - inline JSON to avoid DuckDB 1.4.x parameter binding bug
     tracing::debug!("Preparing from_substrait_json CALL with inlined JSON");

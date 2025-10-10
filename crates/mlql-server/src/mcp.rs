@@ -214,7 +214,8 @@ impl MlqlServerHandler {
             .await
             .map_err(|e| {
                 error!("Failed to execute query: {}", e);
-                CallToolError::from_message(format!("Failed to execute query: {}", e))
+                error!("IR that caused error: {}", serde_json::to_string_pretty(&ir).unwrap_or_default());
+                CallToolError::from_message(format!("Failed to execute query: {}\n\nIR:\n{}", e, serde_json::to_string_pretty(&ir).unwrap_or_default()))
             })?;
 
         info!("Execution info: {}", execution_info);

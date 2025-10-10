@@ -1,0 +1,31 @@
+# MLQL Server Configuration
+# Secrets (API keys) should remain in .env file
+
+server:
+  host: "127.0.0.1"
+  port: 8080
+
+# Execution mode: "sql" or "substrait"
+execution:
+  mode: "sql"
+
+  # Path to Substrait extension (only needed when mode = "substrait")
+  substrait_extension_path: "/Users/colin/Dev/duckdb-substrait-extension/build/release/extension/substrait/substrait.duckdb_extension"
+
+# Logging configuration
+logging:
+  # Log level: trace, debug, info, warn, error
+  # Can also use module-specific filtering: "mlql_server=debug,axum=warn"
+  level: "debug"
+
+  # Output format: pretty, json, compact
+  # - pretty: Human-readable with colors (development)
+  # - json: Structured JSON logs (production)
+  # - compact: Minimal format (testing)
+  format: "pretty"
+
+  # Output destination: stdout, file, both
+  output: "file"
+
+  # Directory for log files (only used when output = file or both)
+  directory: "./logs"

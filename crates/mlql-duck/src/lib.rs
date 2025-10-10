@@ -284,7 +284,10 @@ fn build_sql_query(table: &str, operators: &[mlql_ir::Operator]) -> Result<Strin
                 }
 
                 select_clause = select_items.join(", ");
-                group_clause = Some(group_keys.join(", "));
+                // Only set group_clause if there are actual grouping keys
+                if !group_keys.is_empty() {
+                    group_clause = Some(group_keys.join(", "));
+                }
             }
             mlql_ir::Operator::Sort { keys } => {
                 let order_items: Vec<String> = keys.iter().map(|key| {
