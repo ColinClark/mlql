@@ -66,7 +66,7 @@ env DUCKDB_CUSTOM_BUILD=1 cargo test -p mlql-ir --test substrait_operators
 
 # Or manually with custom DuckDB
 env DUCKDB_CUSTOM_BUILD=1 \
-  DYLD_LIBRARY_PATH=/Users/colin/Dev/truepop/mlql/duckdb-substrait-upgrade/build/release/src:$DYLD_LIBRARY_PATH \
+  DYLD_LIBRARY_PATH=/Users/colin/Dev/duckdb-substrait-extension/build/release/src:$DYLD_LIBRARY_PATH \
   cargo run -p mlql-server
 ```
 
@@ -186,7 +186,7 @@ MLQL_SERVER_PORT=8080
 
 # Custom DuckDB with Substrait (required for substrait mode)
 DUCKDB_CUSTOM_BUILD=1
-SUBSTRAIT_EXTENSION_PATH=/Users/colin/Dev/truepop/mlql/duckdb-substrait-upgrade/build/release/extension/substrait/substrait.duckdb_extension
+SUBSTRAIT_EXTENSION_PATH=/Users/colin/Dev/duckdb-substrait-extension/build/release/package/extensions/substrait.duckdb_extension
 ```
 
 ## Custom DuckDB Build
@@ -194,7 +194,7 @@ SUBSTRAIT_EXTENSION_PATH=/Users/colin/Dev/truepop/mlql/duckdb-substrait-upgrade/
 The Substrait execution requires DuckDB 1.4.1 with statically-linked Substrait extension:
 
 ```bash
-cd /Users/colin/Dev/truepop/mlql/duckdb-substrait-upgrade
+cd /Users/colin/Dev/duckdb-substrait-extension
 
 # Build statically-linked DuckDB with Substrait
 EXTENSION_STATIC_BUILD=1 make release

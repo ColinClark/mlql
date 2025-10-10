@@ -21,7 +21,7 @@ use prost::Message;
 use std::fs;
 use std::process::Command;
 
-const DUCKDB_PATH: &str = "/Users/colin/Dev/truepop/mlql/duckdb-substrait-upgrade/build/release/duckdb";
+const DUCKDB_PATH: &str = "/Users/colin/Dev/duckdb-substrait-extension/build/release/duckdb";
 
 /// Helper to check if our custom DuckDB build exists
 fn duckdb_available() -> bool {

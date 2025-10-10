@@ -49,15 +49,21 @@ Available Operators:
   "projections": [
     {"type": "Column", "col": {"column": "name"}},
     {
-      "type": "BinaryOp",
-      "op": "Mul",
-      "left": {"type": "Column", "col": {"column": "age"}},
-      "right": {"type": "Literal", "value": 2},
+      "type": "Aliased",
+      "expr": {
+        "type": "BinaryOp",
+        "op": "Mul",
+        "left": {"type": "Column", "col": {"column": "age"}},
+        "right": {"type": "Literal", "value": 2}
+      },
       "alias": "double_age"
     }
   ]
 }
 ```
+
+CRITICAL: When a computed expression needs to be referenced later (in GroupBy, Sort, etc.),
+you MUST use the Aliased projection type with a name that subsequent operators can reference.
 
 3. Sort (ORDER BY):
 ```json
@@ -303,6 +309,41 @@ Response:
       },
       {
         "op": "Distinct"
+      }
+    ]
+  }
+}
+
+Query: "average of high minus low for all candles"
+Response:
+{
+  "pipeline": {
+    "source": {"type": "Table", "name": "candle"},
+    "ops": [
+      {
+        "op": "Select",
+        "projections": [
+          {
+            "type": "Aliased",
+            "expr": {
+              "type": "BinaryOp",
+              "op": "Sub",
+              "left": {"type": "Column", "col": {"column": "high"}},
+              "right": {"type": "Column", "col": {"column": "low"}}
+            },
+            "alias": "price_difference"
+          }
+        ]
+      },
+      {
+        "op": "GroupBy",
+        "keys": [],
+        "aggs": {
+          "avg_difference": {
+            "func": "avg",
+            "args": [{"type": "Column", "col": {"column": "price_difference"}}]
+          }
+        }
       }
     ]
   }

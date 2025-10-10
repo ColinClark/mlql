@@ -47,7 +47,8 @@ anyhow = "1.0"
 
 # Logging/Tracing
 tracing = "0.1"
-tracing-subscriber = { version = "0.3", features = ["env-filter"] }
+tracing-subscriber = { version = "0.3", features = ["env-filter", "json", "fmt"] }
+tracing-appender = "0.2"
 
 # Observability
 prometheus = "0.13"
@@ -56,6 +57,10 @@ prometheus = "0.13"
 chrono = { version = "0.4", features = ["serde"] }
 uuid = { version = "1.0", features = ["v4", "serde"] }
 sha2 = "0.10"
+
+# Configuration
+serde_yaml = "0.9"
+config = "0.14"
 
 # LLM Integration
 async-openai = "0.28"
