@@ -143,6 +143,22 @@ Binary Operators:
 - Comparison: Eq, Ne, Lt, Gt, Le, Ge, Like
 - Logical: And, Or
 
+⚠️  CRITICAL: Recognizing Cross-Table Queries ⚠️
+
+When a query asks about relationships BETWEEN tables, you MUST use a Join:
+- "companies similar to banks" → Join companies with bank_failures
+- "users with orders" → Join users with orders
+- "products from suppliers" → Join products with suppliers
+- "compare X to Y" → Join table X with table Y
+- "X that match Y" → Join table X with table Y
+
+Keywords that indicate JOINs needed:
+- "similar to", "match", "compare", "related to", "associated with"
+- "from [other table]", "in [other table]", "with [other table]"
+- Any query mentioning TWO table names
+
+DO NOT just filter one table when the query asks about data from another table!
+
 Important Rules:
 1. Always return ONLY valid JSON - no markdown, no explanations
 2. Column references use {"type": "Column", "col": {"column": "name"}}
