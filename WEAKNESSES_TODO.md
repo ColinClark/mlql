@@ -56,39 +56,31 @@ This document tracks identified weaknesses in the MLQL system and their resoluti
 
 ---
 
-## ❌ Weakness 2: Date/Time Handling
+## ✅ Weakness 2: Date/Time Handling (Serialization)
 
-**Status**: TODO
+**Status**: PARTIALLY COMPLETE ✅
 **Priority**: HIGH
+**Commit**: ebd7a08
 
 **Problem**: Date columns return NULL in results despite working in SQL
-- All date values serialize as `null` in JSON output
-- Catalog shows dates as `<unsupported>`
-- Date range queries convert to exact dates: "from 2023" → "= 2023-01-01"
 
-**Root Causes**:
-1. Result serialization doesn't handle date types
-2. Arrow RecordBatch → JSON conversion loses date values
-3. LLM converts date ranges to exact comparisons
+**Solution Implemented**:
+- ✅ Added Date32, Timestamp, and Time64 serialization
+- ✅ Dates serialize as ISO 8601 strings (YYYY-MM-DD)
+- ✅ Timestamps serialize as datetime strings (YYYY-MM-DD HH:MM:SS)
+- ✅ Times serialize as HH:MM:SS format
+- ✅ Added chrono dependency
+- ✅ Test: `test_date_serialization` passes
 
-**Test Cases**:
-- [ ] SELECT date column → returns actual date values (not null)
-- [ ] "from 2023" → generates >= 2023-01-01 AND < 2024-01-01
-- [ ] "between 2020 and 2023" → proper range
-- [ ] "last 30 days" → relative date computation
-- [ ] "year(date) = 2023" → date extraction functions
+**Remaining Work** (TODO):
+- [ ] Date range queries: "from 2023" → `>= 2023-01-01 AND < 2024-01-01`
+- [ ] Date extraction functions: `year(date) = 2023`
+- [ ] Relative dates: "last 30 days", "this year"
+- [ ] Enhance LLM prompt with date examples
 
-**Implementation Plan**:
-1. Fix date serialization in `to_json_rows()`
-2. Add date range support to IR (DateRange expression type)
-3. Enhance LLM prompt with date examples
-4. Support date extraction functions (year, month, day)
-5. Support relative dates ("last N days", "this year")
-
-**Files to Modify**:
-- `crates/mlql-duck/src/lib.rs` - `to_json_rows()` date handling
-- `crates/mlql-ir/src/types.rs` - DateRange expression type
-- `crates/mlql-server/src/llm.rs` - Date query examples
+**Files Modified**:
+- `crates/mlql-duck/src/lib.rs` - Added date/time type handlers
+- `crates/mlql-duck/Cargo.toml` - Added chrono dependency
 
 ---
 
@@ -266,9 +258,12 @@ For each weakness:
 ## Progress Tracking
 
 - Total Weaknesses: 7
-- Complete: 2 ✅
+- Complete: 2 ✅ (Weakness 0, Weakness 6)
+- Partially Complete: 1 🟡 (Weakness 2 - date serialization done, range queries TODO)
 - In Progress: 0
-- TODO: 5 ❌
+- TODO: 4 ❌ (Weaknesses 1, 3, 4, 5, 7)
 
-**Current Focus**: TBD
+**Current Focus**: Weakness 2 complete. Ready for next weakness.
+
+**Latest Commit**: ebd7a08 - Date/time serialization support
 
