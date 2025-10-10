@@ -191,7 +191,7 @@ fn ir_to_sql(program: &mlql_ir::Program) -> Result<String, ExecutionError> {
     build_sql_query(&table_name, &pipeline.ops)
 }
 
-/// Context for SQL generation with CTE tracking
+/// Context for SQL generation with CTE tracking and schema management
 struct SqlGenerationContext {
     /// List of generated CTEs (WITH clauses)
     ctes: Vec<String>,
@@ -199,6 +199,77 @@ struct SqlGenerationContext {
     current_source: String,
     /// Counter for unique CTE naming
     cte_counter: u32,
+    /// Current schema (available columns at this point in the pipeline)
+    /// Maps column names to whether they need CTE wrapping
+    current_schema: std::collections::HashSet<String>,
+}
+
+impl SqlGenerationContext {
+    fn new(table: String) -> Self {
+        Self {
+            ctes: Vec::new(),
+            current_source: table,
+            cte_counter: 0,
+            current_schema: std::collections::HashSet::new(),
+        }
+    }
+
+    /// Update schema after a Select operator
+    fn update_schema_for_select(&mut self, projections: &[mlql_ir::Projection]) {
+        self.current_schema.clear();
+        for proj in projections {
+            match proj {
+                mlql_ir::Projection::Expr(expr) => {
+                    // Add column names from simple column references
+                    if let mlql_ir::Expr::Column { col } = expr {
+                        self.current_schema.insert(col.column.clone());
+                    }
+                }
+                mlql_ir::Projection::Aliased { alias, .. } => {
+                    // Add aliased column names
+                    self.current_schema.insert(alias.clone());
+                }
+            }
+        }
+    }
+
+    /// Check if we need to wrap operations in a CTE
+    /// This happens when:
+    /// 1. Select has computed columns (aliases), OR
+    /// 2. Subsequent operators reference columns that don't exist in current source
+    fn needs_cte_before_next_op(&self, next_op: Option<&mlql_ir::Operator>) -> bool {
+        // If there's no next operator, no need for CTE
+        let Some(op) = next_op else { return false };
+
+        match op {
+            mlql_ir::Operator::Filter { condition } => {
+                // Check if filter references columns not in current schema
+                !self.schema_contains_expr_columns(condition)
+            }
+            mlql_ir::Operator::Sort { keys } => {
+                // Check if sort references columns not in current schema
+                keys.iter().any(|key| !self.schema_contains_expr_columns(&key.expr))
+            }
+            _ => false
+        }
+    }
+
+    /// Check if all column references in an expression exist in current schema
+    fn schema_contains_expr_columns(&self, expr: &mlql_ir::Expr) -> bool {
+        match expr {
+            mlql_ir::Expr::Column { col } => {
+                // If schema is empty, we haven't tracked it yet (allow all)
+                self.current_schema.is_empty() || self.current_schema.contains(&col.column)
+            }
+            mlql_ir::Expr::BinaryOp { left, right, .. } => {
+                self.schema_contains_expr_columns(left) && self.schema_contains_expr_columns(right)
+            }
+            mlql_ir::Expr::FuncCall { args, .. } => {
+                args.iter().all(|arg| self.schema_contains_expr_columns(arg))
+            }
+            _ => true, // Literals and other expressions don't reference columns
+        }
+    }
 }
 
 /// Determine if a Select operator needs a CTE
@@ -209,12 +280,8 @@ fn needs_cte(projections: &[mlql_ir::Projection]) -> bool {
 
 /// Build SQL query from table and operators
 fn build_sql_query(table: &str, operators: &[mlql_ir::Operator]) -> Result<String, ExecutionError> {
-    // Initialize context
-    let mut ctx = SqlGenerationContext {
-        ctes: Vec::new(),
-        current_source: table.to_string(),
-        cte_counter: 0,
-    };
+    // Initialize context with constructor
+    let mut ctx = SqlGenerationContext::new(table.to_string());
 
     let mut select_clause = "*".to_string();
     let mut where_clause = None;
@@ -224,11 +291,13 @@ fn build_sql_query(table: &str, operators: &[mlql_ir::Operator]) -> Result<Strin
     let mut distinct = false;
 
     // Process operators in order
-    for op in operators {
+    for (idx, op) in operators.iter().enumerate() {
+        let next_op = operators.get(idx + 1);
+
         match op {
             mlql_ir::Operator::Select { projections } => {
-                // Check if this Select needs a CTE (has computed columns)
-                if needs_cte(projections) {
+                // Check if this Select needs a CTE (has computed columns OR next operator needs current schema)
+                if needs_cte(projections) || ctx.needs_cte_before_next_op(next_op) {
                     // Build SELECT list for the CTE
                     let select_items: Vec<String> = projections.iter().map(|proj| {
                         match proj {
@@ -278,6 +347,9 @@ fn build_sql_query(table: &str, operators: &[mlql_ir::Operator]) -> Result<Strin
 
                     select_clause = select_items.join(", ");
                 }
+
+                // Update schema to reflect what columns will be available after this Select
+                ctx.update_schema_for_select(projections);
             }
             mlql_ir::Operator::Filter { condition } => {
                 where_clause = Some(expr_to_sql(condition));
@@ -311,6 +383,11 @@ fn build_sql_query(table: &str, operators: &[mlql_ir::Operator]) -> Result<Strin
 
                 // Append to current source
                 ctx.current_source.push_str(&format!(" {} {} ON {}", join_type_sql, source_sql, on_condition));
+
+                // Update schema: Join extends schema with right-side columns
+                // We clear the schema (= "unknown") to be conservative - all column references will be allowed
+                // A more accurate implementation would query the catalog for the right table's columns
+                ctx.current_schema.clear();
             }
             mlql_ir::Operator::GroupBy { keys, aggs } => {
                 // Build GROUP BY keys
@@ -341,6 +418,15 @@ fn build_sql_query(table: &str, operators: &[mlql_ir::Operator]) -> Result<Strin
                 // Only set group_clause if there are actual grouping keys
                 if !group_keys.is_empty() {
                     group_clause = Some(group_keys.join(", "));
+                }
+
+                // Update schema: GroupBy transforms schema to [grouping_keys..., aggregate_aliases...]
+                ctx.current_schema.clear();
+                for key in keys {
+                    ctx.current_schema.insert(key.column.clone());
+                }
+                for (alias, _) in aggs {
+                    ctx.current_schema.insert(alias.clone());
                 }
             }
             mlql_ir::Operator::Sort { keys } => {
@@ -1323,6 +1409,50 @@ mod tests {
         //
         // For now, documenting this limitation. These operators would be better
         // implemented as a separate query combiner at a higher level.
+        Ok(())
+    }
+
+    #[test]
+    fn test_filter_before_select_projection() -> Result<(), Box<dyn std::error::Error>> {
+        // This is the critical edge case: Filter references columns that will be removed by Select
+        // Expected behavior: Filter executes on source table, then Select projects the result
+        // Schema tracking should recognize filter comes BEFORE select (empty schema), allowing all columns
+
+        let executor = DuckExecutor::new()?;
+
+        // Create test table with company financial data (using INTEGER to avoid DECIMAL conversion issues)
+        executor.connection().execute_batch(
+            "CREATE TABLE financials (company VARCHAR, revenue INTEGER, costs INTEGER, profit INTEGER);
+             INSERT INTO financials VALUES ('Acme', 1000000, 800000, 200000), ('BigCo', 500000, 450000, 50000), ('TechCorp', 2000000, 1900000, 100000);"
+        )?;
+
+        // Use MLQL parser to build IR: Filter(profit > 50000) → Select(profit, revenue, company)
+        // Note: Using lowercase column names to work with parser, square brackets required for select
+        let mlql_query = "from financials | filter profit > 50000 | select [profit, revenue, company]";
+        let ast_program = mlql_ast::parse(mlql_query)?;
+        let program = ast_program.to_ir();
+
+        // Execute and verify it doesn't fail
+        let result = executor.execute_ir(&program, None)?;
+
+        // Should return 2 rows (Acme with profit 200000 > 50000, TechCorp with profit 100000 > 50000)
+        // BigCo with profit 50000 is NOT > 50000 (filtered out)
+        assert_eq!(result.row_count, 2, "Should return 2 rows after filtering");
+
+        // Verify columns are correct (profit, revenue, company)
+        assert_eq!(result.columns.len(), 3, "Should have 3 columns");
+        assert_eq!(result.columns[0], "profit");
+        assert_eq!(result.columns[1], "revenue");
+        assert_eq!(result.columns[2], "company");
+
+        // Verify the companies are correct
+        let companies: Vec<String> = result.rows.iter()
+            .map(|row| row[2].as_str().unwrap().to_string())
+            .collect();
+        assert!(companies.contains(&"Acme".to_string()));
+        assert!(companies.contains(&"TechCorp".to_string()));
+        assert!(!companies.contains(&"BigCo".to_string()), "BigCo should be filtered out (profit not > 50000)");
+
         Ok(())
     }
 }
